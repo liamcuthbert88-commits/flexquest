@@ -80,6 +80,7 @@ export default function TycoonScreen() {
   const [cashPopups, setCashPopups] = useState<CashPopup[]>([]);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [isEditingEquipment, setIsEditingEquipment] = useState(false);
+  const [placingEquipmentId, setPlacingEquipmentId] = useState<string | null>(null);
   const { height: windowHeight } = useWindowDimensions();
   const scrollY = useRef(new Animated.Value(0)).current;
   const gymLevelCardScale = scrollY.interpolate({
@@ -208,6 +209,8 @@ export default function TycoonScreen() {
             setSelection(next);
             setIsEditingEquipment(false);
           }}
+          placingEquipmentId={placingEquipmentId}
+          onPlacementSettled={() => setPlacingEquipmentId(null)}
         />
       </View>
 
@@ -445,11 +448,7 @@ export default function TycoonScreen() {
         onToggleEdit={() => setIsEditingEquipment((prev) => !prev)}
         onSetColor={setEquipmentColor}
         onRotate={rotateEquipment}
-        onStartMove={() => {
-          /* Wired to the drag-to-relocate gesture in Task 7 — this
-             task only adds the button; pressing it currently does
-             nothing observable yet. */
-        }}
+        onStartMove={(equipmentId) => setPlacingEquipmentId(equipmentId)}
         onUpgrade={handleUpgradeEquipment}
       />
     </SafeAreaView>

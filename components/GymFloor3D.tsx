@@ -18,7 +18,9 @@ import {
   getEquipmentWorldPosition,
   getEquipmentColor,
   getEquipmentRotationStep,
+  gridToWorldPosition,
 } from "@/constants/equipment";
+import { findNearestValidCell, getOccupiedCells, type GridCell } from "@/constants/equipmentGrid";
 import {
   MAIN_FLOOR_ZONE_ID,
   getPlayAreaBounds,
@@ -174,6 +176,52 @@ function worldToScreen(
   return {
     x: ((vector.x + 1) / 2) * viewWidth,
     y: ((1 - vector.y) / 2) * viewHeight,
+  };
+}
+
+/** The inverse of worldToScreen: given a screen pixel and the same camera
+ * parameters (azimuth/polar/orbitRadius, camera always orbiting and looking
+ * at the world origin — this file has no camera-pan/target-offset feature,
+ * so there is no targetX/targetZ to thread through here either), finds
+ * where that pixel's ray intersects the floor's y=0 plane. Used to turn a
+ * live finger position into a live world X/Z while dragging an equipment
+ * item, replicating the camera the same self-contained way worldToScreen
+ * already does rather than reaching into R3F's internal raycasting system. */
+function screenToGroundPosition(
+  screenX: number,
+  screenY: number,
+  azimuth: number,
+  polar: number,
+  orbitRadius: number,
+  viewWidth: number,
+  viewHeight: number
+): { x: number; z: number } | null {
+  if (viewWidth <= 0 || viewHeight <= 0) return null;
+
+  const camera = new PerspectiveCamera(CAMERA_FOV, viewWidth / viewHeight, 0.1, 1000);
+  camera.position.set(
+    orbitRadius * Math.sin(polar) * Math.sin(azimuth),
+    orbitRadius * Math.cos(polar),
+    orbitRadius * Math.sin(polar) * Math.cos(azimuth)
+  );
+  camera.lookAt(0, 0, 0);
+  camera.updateMatrixWorld();
+
+  const ndcX = (screenX / viewWidth) * 2 - 1;
+  const ndcY = -(screenY / viewHeight) * 2 + 1;
+
+  const nearPoint = new Vector3(ndcX, ndcY, 0).unproject(camera);
+  const farPoint = new Vector3(ndcX, ndcY, 1).unproject(camera);
+  const direction = farPoint.clone().sub(nearPoint).normalize();
+
+  // Intersect with the y=0 plane: nearPoint.y + t * direction.y = 0.
+  if (Math.abs(direction.y) < 1e-6) return null;
+  const t = -nearPoint.y / direction.y;
+  if (t < 0) return null;
+
+  return {
+    x: nearPoint.x + direction.x * t,
+    z: nearPoint.z + direction.z * t,
   };
 }
 
@@ -565,11 +613,46 @@ function EquipmentSpotlight({ position }: { position: [number, number, number] }
   );
 }
 
+/** Translucent stand-in shown at the live drag position while an equipment
+ * item is being moved, plus a highlighted tile at the nearest valid drop
+ * cell — not the item's actual detailed model, matching how other
+ * lightweight visual affordances in this file (GlowLayer, selection ring)
+ * favor simple geometry over reusing a heavy model for a transient effect. */
+function PlacementGhost({
+  dragPosition,
+  targetCell,
+  color,
+}: {
+  dragPosition: [number, number, number];
+  targetCell: { row: number; col: number } | null;
+  color: string;
+}) {
+  return (
+    <>
+      <mesh position={dragPosition}>
+        <boxGeometry args={[1.4, 1.4, 1.4]} />
+        <meshStandardMaterial color={color} transparent opacity={0.5} />
+      </mesh>
+      {targetCell && (
+        <mesh
+          position={gridToWorldPosition(targetCell.row, targetCell.col)}
+          rotation={[-Math.PI / 2, 0, 0]}
+        >
+          <planeGeometry args={[TILE_SIZE - TILE_SEAM_GAP, TILE_SIZE - TILE_SEAM_GAP]} />
+          <meshBasicMaterial color={NEON_COLOR} transparent opacity={0.4} />
+        </mesh>
+      )}
+    </>
+  );
+}
+
 type GymFloorSceneProps = {
   onSelect?: (selection: Selection | null) => void;
+  placingEquipmentId: string | null;
+  onPlacementSettled: () => void;
 };
 
-function GymFloorScene({ onSelect }: GymFloorSceneProps) {
+function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: GymFloorSceneProps) {
   const {
     purchasedEquipmentIds,
     unlockedZones,
@@ -579,6 +662,7 @@ function GymFloorScene({ onSelect }: GymFloorSceneProps) {
     currentLocationId,
     prestigeCount,
     equipmentCustomizations,
+    moveEquipment,
   } = useUser();
 
   const ownedEquipment = EQUIPMENT_CATALOG.filter((item) =>
@@ -615,6 +699,32 @@ function GymFloorScene({ onSelect }: GymFloorSceneProps) {
   onSelectRef.current = onSelect;
   const ownedEquipmentRef = useRef(ownedEquipment);
   ownedEquipmentRef.current = ownedEquipment;
+  // panResponder below is built via useMemo(..., []) — a persistent closure
+  // created once — so anything inside it that can change over time (bounds
+  // as zones unlock, customizations as items move/recolor, moveEquipment's
+  // own closured state each UserProvider render) needs the same ref-mirror
+  // treatment as onSelectRef/ownedEquipmentRef above, or the drag handler
+  // would silently validate/commit against stale data from mount time.
+  const boundsRef = useRef(playAreaBounds);
+  boundsRef.current = playAreaBounds;
+  const equipmentCustomizationsRef = useRef(equipmentCustomizations);
+  equipmentCustomizationsRef.current = equipmentCustomizations;
+  const moveEquipmentRef = useRef(moveEquipment);
+  moveEquipmentRef.current = moveEquipment;
+
+  // Live drag state for the Move interaction — a ref (not state) since it
+  // updates every touch-move frame; ghostPositionForRender mirrors it into
+  // state only at a throttled rate suitable for a re-render (see the drag
+  // handler below), the same pattern this file already uses for azimuth
+  // easing (ref for the hot path, occasional state for what needs to
+  // actually re-render).
+  const dragWorldPositionRef = useRef<[number, number, number] | null>(null);
+  const dragTargetCellRef = useRef<GridCell | null>(null);
+  const [ghostRenderTick, setGhostRenderTick] = useState(0);
+  const placingEquipmentIdRef = useRef(placingEquipmentId);
+  placingEquipmentIdRef.current = placingEquipmentId;
+  const onPlacementSettledRef = useRef(onPlacementSettled);
+  onPlacementSettledRef.current = onPlacementSettled;
 
   // Defensive: a prestige reset can sell equipment out from under an active
   // selection — clear it rather than showing a stale inspector for it.
@@ -664,6 +774,48 @@ function GymFloorScene({ onSelect }: GymFloorSceneProps) {
             pinchStartDistanceRef.current = null;
           }
 
+          const placingId = placingEquipmentIdRef.current;
+          if (placingId) {
+            // Placement mode: single-finger drag repositions a ghost
+            // preview instead of orbiting the camera. Two-finger
+            // pinch/rotate (handled above, before this branch) still works
+            // normally, so the player can zoom out mid-drag to see across
+            // what used to be separate zones.
+            //
+            // `placingId` is captured into this local const (rather than
+            // reading `placingEquipmentIdRef.current` again below) so its
+            // type narrows from `string | null` to `string` for the calls
+            // below — TypeScript's control-flow narrowing on a mutable
+            // ref's `.current` property isn't guaranteed to persist across
+            // multiple reads the way a local const's narrowing is.
+            const { width, height } = layoutSizeRef.current;
+            const ground = screenToGroundPosition(
+              evt.nativeEvent.locationX,
+              evt.nativeEvent.locationY,
+              azimuthRef.current,
+              polarRef.current,
+              currentRadiusRef.current + zoomOffsetRef.current,
+              width,
+              height
+            );
+            if (ground) {
+              dragWorldPositionRef.current = [ground.x, 0.8, ground.z];
+              const occupied = getOccupiedCells(
+                ownedEquipmentRef.current,
+                equipmentCustomizationsRef.current,
+                placingId
+              );
+              dragTargetCellRef.current = findNearestValidCell(
+                ground.x,
+                ground.z,
+                boundsRef.current,
+                occupied
+              );
+              setGhostRenderTick((tick) => tick + 1);
+            }
+            return;
+          }
+
           const deltaX = gestureState.dx - lastPan.current.dx;
           const deltaY = gestureState.dy - lastPan.current.dy;
           lastPan.current = { dx: gestureState.dx, dy: gestureState.dy };
@@ -674,6 +826,19 @@ function GymFloorScene({ onSelect }: GymFloorSceneProps) {
         onPanResponderRelease: (evt, gestureState) => {
           wasMultiTouchRef.current = false;
           pinchStartDistanceRef.current = null;
+
+          const placingIdOnRelease = placingEquipmentIdRef.current;
+          if (placingIdOnRelease) {
+            const targetCell = dragTargetCellRef.current;
+            if (targetCell) {
+              moveEquipmentRef.current(placingIdOnRelease, targetCell.row, targetCell.col);
+            }
+            dragWorldPositionRef.current = null;
+            dragTargetCellRef.current = null;
+            setGhostRenderTick((tick) => tick + 1);
+            onPlacementSettledRef.current();
+            return;
+          }
 
           const elapsed = Date.now() - gestureStartTimeRef.current;
           const isTap =
@@ -792,6 +957,17 @@ function GymFloorScene({ onSelect }: GymFloorSceneProps) {
           equipmentCustomizations={equipmentCustomizations}
         />
 
+        {placingEquipmentId && dragWorldPositionRef.current && (
+          <PlacementGhost
+            dragPosition={dragWorldPositionRef.current}
+            targetCell={dragTargetCellRef.current}
+            color={getEquipmentColor(
+              EQUIPMENT_CATALOG.find((entry) => entry.id === placingEquipmentId)!,
+              equipmentCustomizations
+            )}
+          />
+        )}
+
         <CameraRig
           azimuthRef={azimuthRef}
           polarRef={polarRef}
@@ -831,12 +1007,23 @@ class GymFloorErrorBoundary extends Component<{ children: ReactNode }, BoundaryS
 
 type GymFloor3DProps = {
   onSelect?: (selection: Selection | null) => void;
+  /** Non-null while the player is actively dragging this equipment item to
+   * a new cell — redirects single-finger drag from camera-orbit to
+   * repositioning a ghost preview of the item instead. */
+  placingEquipmentId?: string | null;
+  /** Fired once the drag ends, whether the move committed or was
+   * cancelled — lets the parent clear its own "is placing" state. */
+  onPlacementSettled?: () => void;
 };
 
-export function GymFloor3D({ onSelect }: GymFloor3DProps) {
+export function GymFloor3D({ onSelect, placingEquipmentId, onPlacementSettled }: GymFloor3DProps) {
   return (
     <GymFloorErrorBoundary>
-      <GymFloorScene onSelect={onSelect} />
+      <GymFloorScene
+        onSelect={onSelect}
+        placingEquipmentId={placingEquipmentId ?? null}
+        onPlacementSettled={onPlacementSettled ?? (() => {})}
+      />
     </GymFloorErrorBoundary>
   );
 }
