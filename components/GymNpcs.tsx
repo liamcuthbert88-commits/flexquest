@@ -1,7 +1,11 @@
 import { useRef, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber/native";
 import type { Group } from "three";
-import { EQUIPMENT_CATALOG, getEquipmentWorldPosition } from "@/constants/equipment";
+import {
+  EQUIPMENT_CATALOG,
+  getEquipmentWorldPosition,
+  type EquipmentCustomization,
+} from "@/constants/equipment";
 import { ZONE_LANDMARKS, MAIN_FLOOR_ZONE_ID, SMOOTHIE_BAR_POSITION, LOCKER_POSITION } from "@/constants/zones";
 
 export const NPC_COLORS = ["#F97316", "#22D3EE", "#E879F9"];
@@ -111,7 +115,8 @@ function updateNpc(
   unlockedZones: string[],
   occupancy: Record<string, boolean>,
   speedMultiplier: number,
-  onRecharged: () => void
+  onRecharged: () => void,
+  equipmentCustomizations: Record<string, EquipmentCustomization>
 ) {
   // Defensive: a prestige reset can clear owned equipment out from under an
   // NPC that's mid-workout or mid-walk toward it. Send them home instead of
@@ -143,7 +148,7 @@ function updateNpc(
       if (!equipment) break;
 
       npc.targetEquipmentId = equipmentId;
-      npc.target = getEquipmentWorldPosition(equipment);
+      npc.target = getEquipmentWorldPosition(equipment, equipmentCustomizations);
       npc.state = "walkingToEquipment";
       break;
     }
@@ -218,6 +223,7 @@ type GymNpcsProps = {
   /** Fired once per NPC each time it finishes a recharge cycle at the bar —
    * a discrete event, not a per-frame callback. */
   onRecharged: () => void;
+  equipmentCustomizations: Record<string, EquipmentCustomization>;
 };
 
 export function GymNpcs({
@@ -228,6 +234,7 @@ export function GymNpcs({
   selectedNpcId,
   speedMultiplier,
   onRecharged,
+  equipmentCustomizations,
 }: GymNpcsProps) {
   const groupRefs = useRef<(Group | null)[]>([]);
   const ownedIdsRef = useRef(ownedEquipmentIds);
@@ -238,6 +245,8 @@ export function GymNpcs({
   speedMultiplierRef.current = speedMultiplier;
   const onRechargedRef = useRef(onRecharged);
   onRechargedRef.current = onRecharged;
+  const equipmentCustomizationsRef = useRef(equipmentCustomizations);
+  equipmentCustomizationsRef.current = equipmentCustomizations;
 
   useFrame((_, delta) => {
     const npcs = npcRuntimesRef.current;
@@ -249,7 +258,8 @@ export function GymNpcs({
         unlockedZonesRef.current,
         occupancyRef.current,
         speedMultiplierRef.current,
-        () => onRechargedRef.current()
+        () => onRechargedRef.current(),
+        equipmentCustomizationsRef.current
       );
       const group = groupRefs.current[i];
       if (group) {

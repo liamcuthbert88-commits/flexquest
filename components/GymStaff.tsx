@@ -1,7 +1,11 @@
 import { useRef, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber/native";
 import type { Group } from "three";
-import { EQUIPMENT_CATALOG, getEquipmentWorldPosition } from "@/constants/equipment";
+import {
+  EQUIPMENT_CATALOG,
+  getEquipmentWorldPosition,
+  type EquipmentCustomization,
+} from "@/constants/equipment";
 import { ZONE_LANDMARKS, MAIN_FLOOR_ZONE_ID, SMOOTHIE_BAR_POSITION } from "@/constants/zones";
 import { moveToward } from "@/components/GymNpcs";
 
@@ -44,12 +48,13 @@ type GymStaffProps = {
   hiredStaffIds: string[];
   unlockedZones: string[];
   occupancyRef: MutableRefObject<Record<string, boolean>>;
+  equipmentCustomizations: Record<string, EquipmentCustomization>;
 };
 
 /** Separate from GymNpcs.tsx — each role's AI is qualitatively different from
  * the regular member work/recharge cycle (no state machine here, just simple
  * role-specific patrols), so it doesn't share that component's state shape. */
-export function GymStaff({ hiredStaffIds, unlockedZones, occupancyRef }: GymStaffProps) {
+export function GymStaff({ hiredStaffIds, unlockedZones, occupancyRef, equipmentCustomizations }: GymStaffProps) {
   const clerkGroupRef = useRef<Group>(null);
   const trainerGroupRef = useRef<Group>(null);
   const trainerClipboardRef = useRef<Group>(null);
@@ -94,7 +99,8 @@ export function GymStaff({ hiredStaffIds, unlockedZones, occupancyRef }: GymStaf
         runtime.target =
           occupiedVaultEquipment.length > 0
             ? getEquipmentWorldPosition(
-                occupiedVaultEquipment[Math.floor(Math.random() * occupiedVaultEquipment.length)]
+                occupiedVaultEquipment[Math.floor(Math.random() * occupiedVaultEquipment.length)],
+                equipmentCustomizations
               )
             : IRON_VAULT_CENTER;
       }

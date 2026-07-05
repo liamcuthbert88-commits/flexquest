@@ -16,6 +16,8 @@ import {
   EQUIPMENT_CATALOG,
   EQUIPMENT_GRID_TILE_SIZE as TILE_SIZE,
   getEquipmentWorldPosition,
+  getEquipmentColor,
+  getEquipmentRotationStep,
 } from "@/constants/equipment";
 import {
   MAIN_FLOOR_ZONE_ID,
@@ -568,8 +570,16 @@ type GymFloorSceneProps = {
 };
 
 function GymFloorScene({ onSelect }: GymFloorSceneProps) {
-  const { purchasedEquipmentIds, unlockedZones, equipmentLevels, hiredStaffIds, addCash, currentLocationId, prestigeCount } =
-    useUser();
+  const {
+    purchasedEquipmentIds,
+    unlockedZones,
+    equipmentLevels,
+    hiredStaffIds,
+    addCash,
+    currentLocationId,
+    prestigeCount,
+    equipmentCustomizations,
+  } = useUser();
 
   const ownedEquipment = EQUIPMENT_CATALOG.filter((item) =>
     purchasedEquipmentIds.includes(item.id)
@@ -739,14 +749,15 @@ function GymFloorScene({ onSelect }: GymFloorSceneProps) {
         {unlockedZones.includes("iron_vault") && <IronVaultZone />}
 
         {ownedEquipment.map((item) => {
-          const position = getEquipmentWorldPosition(item);
+          const position = getEquipmentWorldPosition(item, equipmentCustomizations);
+          const rotationStep = getEquipmentRotationStep(item, equipmentCustomizations);
           const isTopEarner = maxCashPerSecond > 0 && item.cashPerSecond === maxCashPerSecond;
           const isSelected = selection?.type === "equipment" && selection.id === item.id;
           return (
-            <group key={item.id} position={position}>
+            <group key={item.id} position={position} rotation={[0, rotationStep * (Math.PI / 2), 0]}>
               <GymEquipment
                 equipmentId={item.id}
-                color={item.color}
+                color={getEquipmentColor(item, equipmentCustomizations)}
                 isTopEarner={isTopEarner}
                 isSelected={isSelected}
                 level={equipmentLevels[item.id] ?? 1}
@@ -759,7 +770,7 @@ function GymFloorScene({ onSelect }: GymFloorSceneProps) {
         {ownedEquipment.map((item) => (
           <EquipmentSpotlight
             key={`spot-${item.id}`}
-            position={getEquipmentWorldPosition(item)}
+            position={getEquipmentWorldPosition(item, equipmentCustomizations)}
           />
         ))}
 
@@ -771,12 +782,14 @@ function GymFloorScene({ onSelect }: GymFloorSceneProps) {
           selectedNpcId={selection?.type === "npc" ? selection.id : null}
           speedMultiplier={janitorSpeedMultiplier}
           onRecharged={() => addCash(smoothieBarRechargeCash)}
+          equipmentCustomizations={equipmentCustomizations}
         />
 
         <GymStaff
           hiredStaffIds={hiredStaffIds}
           unlockedZones={unlockedZones}
           occupancyRef={occupancyRef}
+          equipmentCustomizations={equipmentCustomizations}
         />
 
         <CameraRig
