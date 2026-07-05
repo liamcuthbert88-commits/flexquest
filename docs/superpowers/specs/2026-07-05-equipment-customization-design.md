@@ -23,17 +23,17 @@ Reject the three-separate-grids approach. Instead: **one grid spanning the curre
 `Equipment.zoneId` is dropped as a placement anchor. Position becomes a single `{ row, col }` — **but critically, these are absolute lattice coordinates centered on the fixed world origin, not 0-based indices from the current bounds' min corner.** `TiledFloor` internally indexes its own tiles from `bounds.minX`/`minZ`, and since `minX`/`minZ` grow more negative as zones like Iron Vault unlock, a 0-based index would silently point to a different world cell before and after that unlock — equipment would appear to jump for no reason the player caused. Instead:
 
 ```ts
-worldX = col * TILE_SIZE; // TILE_SIZE = 2.5
-worldZ = row * TILE_SIZE;
+worldX = col * TILE_SIZE + TILE_SIZE / 2; // TILE_SIZE = 2.5
+worldZ = row * TILE_SIZE + TILE_SIZE / 2;
 ```
 
-`col`/`row` can be any integer, positive or negative. Every zone boundary in `getPlayAreaBounds` is already a multiple of `TILE_SIZE` (confirmed: -20, -15, -10, 10, 20 all divide evenly by 2.5), so this lattice aligns exactly with `TiledFloor`'s tile seams everywhere, in every unlock state, forever — it just never needs to shift.
+The `+ TILE_SIZE / 2` term is required, not optional: `TiledFloor` centers its tiles at `bounds.minX + TILE_SIZE/2 + n*TILE_SIZE`, not at `n*TILE_SIZE`. Since every bounds value is a multiple of `TILE_SIZE`, that's algebraically the same lattice as `TILE_SIZE/2 + col*TILE_SIZE` for integer `col` — but only with the half-tile offset included. Without it, equipment would sit exactly on the seam between two tiles instead of centered on one, defeating the "uniform with the flooring" goal. `col`/`row` can be any integer, positive or negative, and this lattice aligns exactly with `TiledFloor`'s tile centers everywhere, in every unlock state, forever — it never needs to shift.
 
 ### Valid-cell computation
 
 A cell is placeable if, and only if:
-1. It falls inside `getPlayAreaBounds(unlockedZones)`.
-2. It isn't in the fixed exclusion list: Smoothie Bar's footprint (world `[-6,0,-6]`), Locker Room Door's footprint (world `[6,0,-6]`), Iron Vault's two fence-panel cells (world `[-15,1,-15]` and `[-20,1,-10]` footprints), and the wall/pillar perimeter cells (derived from `GymWalls`' bounds).
+1. It falls at least one tile's clearance inside `getPlayAreaBounds(unlockedZones)` (not just technically inside it) — this single margin rule handles the walls, corner pillars, *and* Iron Vault's two wireframe fence panels in one shot, since tracing their actual world coordinates shows the fence panels sit exactly on Iron Vault's own `minX`/`minZ` boundary edge — they're boundary features, not separate interior obstacles requiring their own exclusion entries.
+2. It isn't within one tile of Smoothie Bar's footprint (world `[-6,0,-6]`) or Locker Room Door's footprint (world `[6,0,-6]`) — these *are* interior landmarks (not boundary-adjacent), so they need their own distance check.
 3. It isn't already occupied by another owned equipment item (excluding the item currently being moved, if any).
 
 This list is computed fresh whenever edit mode's Move sub-state opens, and again continuously during a drag (to highlight the nearest valid cell and to validate the drop).
