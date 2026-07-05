@@ -9,13 +9,41 @@ import type { Selection, NpcSnapshot } from "@/components/GymFloor3D";
 const PANEL_HIDDEN_OFFSET = 320;
 const NPC_SNAPSHOT_POLL_MS = 500;
 
+/** Curated palette, reusing hex values already present in the game's
+ * equipment catalog and neon signage rather than inventing new colors —
+ * keeps player recoloring visually consistent with the existing aesthetic. */
+const EQUIPMENT_COLOR_SWATCHES = [
+  "#FBBF24",
+  "#C084FC",
+  "#2DD4BF",
+  "#38BDF8",
+  "#F472B6",
+  "#A3E635",
+  "#8B5CF6",
+  "#F8F9FA",
+];
+
 type Props = {
   selection: Selection | null;
   onClose: () => void;
   onUpgrade: (equipmentId: string) => void;
+  onSetColor: (equipmentId: string, color: string) => void;
+  onRotate: (equipmentId: string) => void;
+  onStartMove: (equipmentId: string) => void;
+  isEditing: boolean;
+  onToggleEdit: () => void;
 };
 
-export function InspectorPanel({ selection, onClose, onUpgrade }: Props) {
+export function InspectorPanel({
+  selection,
+  onClose,
+  onUpgrade,
+  onSetColor,
+  onRotate,
+  onStartMove,
+  isEditing,
+  onToggleEdit,
+}: Props) {
   const { hiredManagerIds, globalMultiplier, equipmentLevels, cash } = useUser();
   const translateY = useRef(new Animated.Value(PANEL_HIDDEN_OFFSET)).current;
   const [npcSnapshot, setNpcSnapshot] = useState<NpcSnapshot | null>(null);
@@ -82,6 +110,47 @@ export function InspectorPanel({ selection, onClose, onUpgrade }: Props) {
               <Text style={styles.actionButtonText}>Upgrade ⚡</Text>
             </Pressable>
           </View>
+
+          <Pressable style={styles.editToggleButton} onPress={onToggleEdit}>
+            <Ionicons
+              name={isEditing ? "checkmark-done-outline" : "create-outline"}
+              size={16}
+              color={colors.accentPrimary}
+            />
+            <Text style={styles.editToggleText}>{isEditing ? "Done Editing" : "Edit"}</Text>
+          </Pressable>
+
+          {isEditing && (
+            <View style={styles.editSection}>
+              <Text style={styles.statLabel}>Colour</Text>
+              <View style={styles.swatchRow}>
+                {EQUIPMENT_COLOR_SWATCHES.map((swatch) => (
+                  <Pressable
+                    key={swatch}
+                    style={[styles.swatch, { backgroundColor: swatch }]}
+                    onPress={() => onSetColor(equipmentItem.id, swatch)}
+                  />
+                ))}
+              </View>
+
+              <View style={styles.editButtonRow}>
+                <Pressable
+                  style={styles.editActionButton}
+                  onPress={() => onRotate(equipmentItem.id)}
+                >
+                  <Ionicons name="refresh-outline" size={16} color={colors.textPrimary} />
+                  <Text style={styles.editActionButtonText}>Rotate</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.editActionButton}
+                  onPress={() => onStartMove(equipmentItem.id)}
+                >
+                  <Ionicons name="swap-horizontal-outline" size={16} color={colors.textPrimary} />
+                  <Text style={styles.editActionButtonText}>Move</Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
 
           <View style={styles.statRow}>
             <Text style={styles.statLabel}>Current Tier</Text>
@@ -231,6 +300,56 @@ const styles = StyleSheet.create({
   actionButtonText: {
     fontSize: 14,
     fontWeight: "700",
+    color: colors.textPrimary,
+  },
+  editToggleButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  editToggleText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.accentPrimary,
+  },
+  editSection: {
+    gap: spacing.sm,
+    paddingTop: spacing.xs,
+  },
+  swatchRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  swatch: {
+    width: 28,
+    height: 28,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  editButtonRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  editActionButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surfaceElevated,
+  },
+  editActionButtonText: {
+    fontSize: 13,
+    fontWeight: "600",
     color: colors.textPrimary,
   },
 });

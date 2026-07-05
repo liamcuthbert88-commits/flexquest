@@ -71,12 +71,15 @@ export default function TycoonScreen() {
     currentLocation,
     addCash,
     injectDevRiches,
+    setEquipmentColor,
+    rotateEquipment,
   } = useUser();
   const [activeTab, setActiveTab] = useState<TabKey>("equipment");
   const [isPrestigeModalVisible, setPrestigeModalVisible] = useState(false);
   const [isSnapshotModalVisible, setSnapshotModalVisible] = useState(false);
   const [cashPopups, setCashPopups] = useState<CashPopup[]>([]);
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [isEditingEquipment, setIsEditingEquipment] = useState(false);
   const { height: windowHeight } = useWindowDimensions();
   const scrollY = useRef(new Animated.Value(0)).current;
   const gymLevelCardScale = scrollY.interpolate({
@@ -200,7 +203,12 @@ export default function TycoonScreen() {
       </Animated.View>
 
       <View style={[styles.gymFloorContainer, { height: windowHeight * 0.4 }]}>
-        <GymFloor3D onSelect={setSelection} />
+        <GymFloor3D
+          onSelect={(next) => {
+            setSelection(next);
+            setIsEditingEquipment(false);
+          }}
+        />
       </View>
 
       <Animated.ScrollView
@@ -429,7 +437,19 @@ export default function TycoonScreen() {
       />
       <InspectorPanel
         selection={selection}
-        onClose={() => setSelection(null)}
+        onClose={() => {
+          setSelection(null);
+          setIsEditingEquipment(false);
+        }}
+        isEditing={isEditingEquipment}
+        onToggleEdit={() => setIsEditingEquipment((prev) => !prev)}
+        onSetColor={setEquipmentColor}
+        onRotate={rotateEquipment}
+        onStartMove={() => {
+          /* Wired to the drag-to-relocate gesture in Task 7 — this
+             task only adds the button; pressing it currently does
+             nothing observable yet. */
+        }}
         onUpgrade={handleUpgradeEquipment}
       />
     </SafeAreaView>
