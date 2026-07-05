@@ -7,12 +7,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { EQUIPMENT_CATALOG } from "@/constants/equipment";
+import { EQUIPMENT_CATALOG, type EquipmentCustomization } from "@/constants/equipment";
+import { isValidCell, getOccupiedCells } from "@/constants/equipmentGrid";
 import { UPGRADE_CATALOG } from "@/constants/upgrades";
 import { MANAGER_CATALOG } from "@/constants/managers";
 import { QUEST_CATALOG, type Quest, type QuestContext } from "@/constants/quests";
 import { LOCATION_CATALOG, getLocation, type Location } from "@/constants/locations";
-import { ZONE_CATALOG, MAIN_FLOOR_ZONE_ID } from "@/constants/zones";
+import { ZONE_CATALOG, MAIN_FLOOR_ZONE_ID, getPlayAreaBounds } from "@/constants/zones";
 import { STAFF_CATALOG, TRAINER_IRON_VAULT_MULTIPLIER } from "@/constants/staff";
 import { createDebouncedSaver, loadJSON } from "@/lib/storage";
 
@@ -52,6 +53,7 @@ type PersistedUserStats = {
   unlockedZones: string[];
   equipmentLevels: Record<string, number>;
   hiredStaffIds: string[];
+  equipmentCustomizations: Record<string, EquipmentCustomization>;
 };
 
 function isValidPersistedStats(value: unknown): value is PersistedUserStats {
@@ -73,7 +75,9 @@ function isValidPersistedStats(value: unknown): value is PersistedUserStats {
     Array.isArray(stats.unlockedZones) &&
     typeof stats.equipmentLevels === "object" &&
     stats.equipmentLevels !== null &&
-    Array.isArray(stats.hiredStaffIds)
+    Array.isArray(stats.hiredStaffIds) &&
+    typeof stats.equipmentCustomizations === "object" &&
+    stats.equipmentCustomizations !== null
   );
 }
 
@@ -118,6 +122,10 @@ type UserContextValue = {
   lifetimeCashEarned: number;
   unlockedZones: string[];
   buyZone: (zoneId: string) => PurchaseResult;
+  equipmentCustomizations: Record<string, EquipmentCustomization>;
+  setEquipmentColor: (equipmentId: string, color: string) => void;
+  rotateEquipment: (equipmentId: string) => void;
+  moveEquipment: (equipmentId: string, row: number, col: number) => boolean;
 };
 
 const UserContext = createContext<UserContextValue | undefined>(undefined);
@@ -138,6 +146,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [unlockedZones, setUnlockedZones] = useState<string[]>([MAIN_FLOOR_ZONE_ID]);
   const [equipmentLevels, setEquipmentLevels] = useState<Record<string, number>>({});
   const [hiredStaffIds, setHiredStaffIds] = useState<string[]>([]);
+  const [equipmentCustomizations, setEquipmentCustomizations] = useState<
+    Record<string, EquipmentCustomization>
+  >({});
   const [isHydrated, setIsHydrated] = useState(false);
   const debouncedSave = useRef(createDebouncedSaver(STORAGE_KEY, SAVE_DEBOUNCE_MS)).current;
 
@@ -162,6 +173,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
         setUnlockedZones(stored.unlockedZones);
         setEquipmentLevels(stored.equipmentLevels);
         setHiredStaffIds(stored.hiredStaffIds);
+        setEquipmentCustomizations(stored.equipmentCustomizations);
       }
       setIsHydrated(true);
     });
@@ -189,6 +201,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       unlockedZones,
       equipmentLevels,
       hiredStaffIds,
+      equipmentCustomizations,
     };
     debouncedSave(stats);
   }, [
@@ -207,6 +220,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     unlockedZones,
     equipmentLevels,
     hiredStaffIds,
+    equipmentCustomizations,
     isHydrated,
     debouncedSave,
   ]);
@@ -402,6 +416,76 @@ export function UserProvider({ children }: { children: ReactNode }) {
     return { success: true, ...questResult };
   }
 
+  function setEquipmentColor(equipmentId: string, color: string): void {
+    if (!purchasedEquipmentIds.includes(equipmentId)) return;
+    setEquipmentCustomizations((prev) => {
+      const item = EQUIPMENT_CATALOG.find((entry) => entry.id === equipmentId);
+      if (!item) return prev;
+      const existing = prev[equipmentId];
+      return {
+        ...prev,
+        [equipmentId]: {
+          row: existing?.row ?? item.gridPosition.row,
+          col: existing?.col ?? item.gridPosition.col,
+          rotationStep: existing?.rotationStep ?? 0,
+          color,
+        },
+      };
+    });
+  }
+
+  function rotateEquipment(equipmentId: string): void {
+    if (!purchasedEquipmentIds.includes(equipmentId)) return;
+    setEquipmentCustomizations((prev) => {
+      const item = EQUIPMENT_CATALOG.find((entry) => entry.id === equipmentId);
+      if (!item) return prev;
+      const existing = prev[equipmentId];
+      const currentStep = existing?.rotationStep ?? 0;
+      const nextStep = ((currentStep + 1) % 4) as 0 | 1 | 2 | 3;
+      return {
+        ...prev,
+        [equipmentId]: {
+          row: existing?.row ?? item.gridPosition.row,
+          col: existing?.col ?? item.gridPosition.col,
+          color: existing?.color ?? item.color,
+          rotationStep: nextStep,
+        },
+      };
+    });
+  }
+
+  /** Returns whether the move was accepted. Rejects (no-op) if the target
+   * cell fails validity (out of bounds, on a landmark, or occupied by
+   * another owned item) — the caller (GymFloor3D's drag handler) should
+   * snap its ghost preview back to the item's prior cell when this returns
+   * false. */
+  function moveEquipment(equipmentId: string, row: number, col: number): boolean {
+    if (!purchasedEquipmentIds.includes(equipmentId)) return false;
+    const item = EQUIPMENT_CATALOG.find((entry) => entry.id === equipmentId);
+    if (!item) return false;
+
+    const bounds = getPlayAreaBounds(unlockedZones);
+    const ownedEquipment = EQUIPMENT_CATALOG.filter((entry) =>
+      purchasedEquipmentIds.includes(entry.id)
+    );
+    const occupied = getOccupiedCells(ownedEquipment, equipmentCustomizations, equipmentId);
+    if (!isValidCell({ row, col }, bounds, occupied)) return false;
+
+    setEquipmentCustomizations((prev) => {
+      const existing = prev[equipmentId];
+      return {
+        ...prev,
+        [equipmentId]: {
+          row,
+          col,
+          color: existing?.color ?? item.color,
+          rotationStep: existing?.rotationStep ?? 0,
+        },
+      };
+    });
+    return true;
+  }
+
   function buyUpgrade(upgradeId: string): PurchaseResult {
     const upgrade = UPGRADE_CATALOG.find((entry) => entry.id === upgradeId);
     if (!upgrade) return { success: false, newlyCompleted: [] };
@@ -470,6 +554,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     setCash(STARTING_CASH);
     setPurchasedEquipmentIds([]);
     setEquipmentLevels({});
+    setEquipmentCustomizations({});
     setHiredManagerIds([]);
     setHiredStaffIds([]);
     setPrestigeCount((prev) => prev + 1);
@@ -532,6 +617,10 @@ export function UserProvider({ children }: { children: ReactNode }) {
       hiredStaffIds,
       hireStaff,
       injectDevRiches,
+      equipmentCustomizations,
+      setEquipmentColor,
+      rotateEquipment,
+      moveEquipment,
     }),
     [
       level,
@@ -553,6 +642,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       lifetimeCashEarned,
       unlockedZones,
       hiredStaffIds,
+      equipmentCustomizations,
     ]
   );
 
