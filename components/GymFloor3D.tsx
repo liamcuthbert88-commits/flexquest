@@ -12,7 +12,11 @@ import { Canvas, useFrame } from "@react-three/fiber/native";
 import { AdditiveBlending, Color, InstancedMesh, Object3D, PerspectiveCamera, Vector3 } from "three";
 
 import { colors, radius } from "@/constants/theme";
-import { EQUIPMENT_CATALOG, getEquipmentWorldPosition } from "@/constants/equipment";
+import {
+  EQUIPMENT_CATALOG,
+  EQUIPMENT_GRID_TILE_SIZE as TILE_SIZE,
+  getEquipmentWorldPosition,
+} from "@/constants/equipment";
 import { MAIN_FLOOR_ZONE_ID } from "@/constants/zones";
 import { SMOOTHIE_BAR_RECHARGE_CASH, CLERK_RECHARGE_MULTIPLIER, JANITOR_SPEED_MULTIPLIER } from "@/constants/staff";
 import { useUser } from "@/contexts/UserContext";
@@ -102,7 +106,6 @@ const CAMERA_FOV = 50;
 
 const FLOOR_SIZE = 20;
 const TILES_PER_SIDE = 8;
-const TILE_SIZE = FLOOR_SIZE / TILES_PER_SIDE;
 const TILE_SEAM_GAP = 0.06;
 
 const MAIN_FLOOR_HALF_SIZE = FLOOR_SIZE / 2;

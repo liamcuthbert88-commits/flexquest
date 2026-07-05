@@ -3,20 +3,26 @@ export type GridPosition = {
   col: number;
 };
 
-const GRID_SPACING = 2;
-const CENTER_OFFSET = 2;
+/** World units per grid cell — matches the floor's own tile size exactly
+ * (GymFloor3D.tsx imports this rather than defining its own, so the two can
+ * never drift apart). Equipment position is always `col * TILE_SIZE +
+ * TILE_SIZE / 2` / `row * TILE_SIZE + TILE_SIZE / 2` — the `+ TILE_SIZE / 2`
+ * is required, not cosmetic: TiledFloor centers its tiles at
+ * `bounds.minX + TILE_SIZE/2 + n*TILE_SIZE`, and since every zone boundary
+ * in getPlayAreaBounds is itself a multiple of TILE_SIZE, this formula lands
+ * on the exact same absolute lattice of tile centers, for any row/col,
+ * forever — without the offset, equipment would sit on tile seams instead. */
+export const EQUIPMENT_GRID_TILE_SIZE = 2.5;
 
-/** World position of the Iron Vault zone group (matches GymFloor3D.tsx's
- * IronVaultZone placement) — kept here too so equipment-position math has a
- * single anchor point without importing the 3D component. */
-const IRON_VAULT_WORLD_POSITION: [number, number, number] = [-15, 0, -10];
-
-/** Converts an equipment's grid row/col into a world-space [x, y, z] position
- * on the gym floor. Shared by GymFloor3D (placing equipment) and GymNpcs
- * (walking to it), so it lives here rather than being duplicated. */
+/** Converts an absolute, origin-centered grid cell into a world-space
+ * [x, y, z] position. `row`/`col` are signed integers, NOT 0-based indices
+ * from any particular zone's corner — a stored (row, col) must mean the
+ * same physical location regardless of which zones are currently unlocked,
+ * since getPlayAreaBounds' min corner shifts as zones unlock. Shared by
+ * GymFloor3D (placing equipment) and GymNpcs/GymStaff (walking to it). */
 export function gridToWorldPosition(row: number, col: number): [number, number, number] {
-  const x = (col - CENTER_OFFSET) * GRID_SPACING;
-  const z = (row - CENTER_OFFSET) * GRID_SPACING;
+  const x = col * EQUIPMENT_GRID_TILE_SIZE + EQUIPMENT_GRID_TILE_SIZE / 2;
+  const z = row * EQUIPMENT_GRID_TILE_SIZE + EQUIPMENT_GRID_TILE_SIZE / 2;
   return [x, 0, z];
 }
 
@@ -26,16 +32,26 @@ export type Equipment = {
   cost: number;
   cashPerSecond: number;
   requiredLevel: number;
-  /** Hex color for this equipment's 3D block on the gym floor. */
+  /** Default hex color for this equipment's 3D block — overridden per-player
+   * by EquipmentCustomization.color when present. */
   color: string;
-  /** Where this equipment's 3D block sits on the gym floor grid — used when
-   * zoneId is "main_floor". */
+  /** Default grid cell — overridden per-player by EquipmentCustomization
+   * when present. Absolute lattice coordinates (see gridToWorldPosition). */
   gridPosition: GridPosition;
-  /** Which zone this equipment physically lives in. */
+  /** Which zone this item counts as belonging to for gameplay bonuses (e.g.
+   * the Iron Vault Trainer's cash multiplier) — NOT used for placement.
+   * A player can move an item to any valid cell across the whole unlocked
+   * floor; it keeps this tag regardless of where it physically sits. */
   zoneId: string;
-  /** Position local to the zone's own group origin — used instead of
-   * gridPosition when zoneId isn't "main_floor". */
-  zoneLocalPosition?: [number, number, number];
+};
+
+/** Per-player override for one equipment item — absent entries fall back
+ * to the item's catalog defaults. Persisted in UserContext. */
+export type EquipmentCustomization = {
+  row: number;
+  col: number;
+  color: string;
+  rotationStep: 0 | 1 | 2 | 3;
 };
 
 export const EQUIPMENT_CATALOG: Equipment[] = [
@@ -46,7 +62,7 @@ export const EQUIPMENT_CATALOG: Equipment[] = [
     cashPerSecond: 1,
     requiredLevel: 1,
     color: "#FBBF24",
-    gridPosition: { row: 1, col: 1 },
+    gridPosition: { row: -1, col: -1 },
     zoneId: "main_floor",
   },
   {
@@ -56,7 +72,7 @@ export const EQUIPMENT_CATALOG: Equipment[] = [
     cashPerSecond: 5,
     requiredLevel: 2,
     color: "#C084FC",
-    gridPosition: { row: 1, col: 2 },
+    gridPosition: { row: -1, col: 0 },
     zoneId: "main_floor",
   },
   {
@@ -66,7 +82,7 @@ export const EQUIPMENT_CATALOG: Equipment[] = [
     cashPerSecond: 15,
     requiredLevel: 3,
     color: "#2DD4BF",
-    gridPosition: { row: 1, col: 3 },
+    gridPosition: { row: -1, col: 1 },
     zoneId: "main_floor",
   },
   {
@@ -76,7 +92,7 @@ export const EQUIPMENT_CATALOG: Equipment[] = [
     cashPerSecond: 120,
     requiredLevel: 6,
     color: "#38BDF8",
-    gridPosition: { row: 2, col: 1 },
+    gridPosition: { row: 0, col: -1 },
     zoneId: "main_floor",
   },
   {
@@ -86,9 +102,8 @@ export const EQUIPMENT_CATALOG: Equipment[] = [
     cashPerSecond: 450,
     requiredLevel: 8,
     color: "#F472B6",
-    gridPosition: { row: 2, col: 2 },
+    gridPosition: { row: -4, col: -6 },
     zoneId: "iron_vault",
-    zoneLocalPosition: [2, 0, 2],
   },
   {
     id: "lat-pulldown-machine",
@@ -97,21 +112,39 @@ export const EQUIPMENT_CATALOG: Equipment[] = [
     cashPerSecond: 1000,
     requiredLevel: 10,
     color: "#A3E635",
-    gridPosition: { row: 2, col: 3 },
+    gridPosition: { row: -5, col: -7 },
     zoneId: "iron_vault",
-    zoneLocalPosition: [-2, 0, -2],
   },
 ];
 
-/** The single source of truth for where an equipment item actually renders —
- * main-floor grid math, or an offset from its zone's world anchor. Used by
- * both GymFloor3D (rendering) and GymNpcs/GymStaff (walk targets) so the two
- * never disagree about where a machine is. */
-export function getEquipmentWorldPosition(item: Equipment): [number, number, number] {
-  if (item.zoneId === "iron_vault" && item.zoneLocalPosition) {
-    const [lx, ly, lz] = item.zoneLocalPosition;
-    const [vx, vy, vz] = IRON_VAULT_WORLD_POSITION;
-    return [vx + lx, vy + ly, vz + lz];
-  }
-  return gridToWorldPosition(item.gridPosition.row, item.gridPosition.col);
+/** The single source of truth for where an equipment item actually renders
+ * — catalog default, overridden per-player by `customizations[item.id]`
+ * when present. Used by GymFloor3D (rendering) and GymNpcs/GymStaff (walk
+ * targets) so all three never disagree about where a machine is. */
+export function getEquipmentWorldPosition(
+  item: Equipment,
+  customizations?: Record<string, EquipmentCustomization>
+): [number, number, number] {
+  const override = customizations?.[item.id];
+  const row = override?.row ?? item.gridPosition.row;
+  const col = override?.col ?? item.gridPosition.col;
+  return gridToWorldPosition(row, col);
+}
+
+/** Catalog default color, overridden per-player when present. */
+export function getEquipmentColor(
+  item: Equipment,
+  customizations?: Record<string, EquipmentCustomization>
+): string {
+  return customizations?.[item.id]?.color ?? item.color;
+}
+
+/** 0 by default (facing its original orientation), overridden per-player
+ * when present. Each step is 90° — applied as rotation.y on the equipment's
+ * wrapping <group> in GymFloor3D.tsx. */
+export function getEquipmentRotationStep(
+  item: Equipment,
+  customizations?: Record<string, EquipmentCustomization>
+): 0 | 1 | 2 | 3 {
+  return customizations?.[item.id]?.rotationStep ?? 0;
 }
