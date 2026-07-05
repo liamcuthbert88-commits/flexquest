@@ -8,6 +8,17 @@ export const NPC_COLORS = ["#F97316", "#22D3EE", "#E879F9"];
 /** Fixed, not randomized — an NPC should keep the same name every time it's selected. */
 export const NPC_NAMES = ["Gains Goblin", "Rep Reaper", "Cardio Crusher"];
 
+/** Accent trim (shorts band + shirt-front panel) distinct from each NPC's
+ * primary shirt color above — a small curated set of athletic tones (dark
+ * track, neon yellow, neon green, navy, heather gray) cycled by index rather
+ * than hand-paired 1:1, so the assignment stays correct if the roster ever
+ * changes size instead of needing a matching manual entry per NPC. */
+const CLOTHING_ACCENT_COLORS = ["#1c1e24", "#facc15", "#4ade80", "#0f172a", "#64748b"];
+
+function getAccentColor(index: number): string {
+  return CLOTHING_ACCENT_COLORS[index % CLOTHING_ACCENT_COLORS.length];
+}
+
 export const LOCKER_POSITION: [number, number, number] = [6, 0, -6];
 export const SMOOTHIE_BAR_POSITION: [number, number, number] = [-6, 0, -6];
 export const WALK_SPEED = 1.2;
@@ -17,6 +28,44 @@ const RECHARGE_DURATION_SECONDS = 2.5;
 const ZONE_VISIT_DURATION_SECONDS = 3;
 /** Chance an idle NPC wanders to an unlocked zone landmark instead of equipment. */
 const ZONE_WANDER_CHANCE = 0.3;
+
+// --- Visual-only tuning below: locomotion smoothing, facing, idle/exertion
+// animation. None of this feeds back into updateNpc's state machine, arrival
+// detection, or timers — it only affects how the already-decided logical
+// state is rendered. ---
+const POSITION_SMOOTHING_RATE = 8;
+const ROTATION_SMOOTHING_RATE = 6;
+const WALK_BOB_FREQUENCY = 6;
+const WALK_BOB_AMPLITUDE = 0.025;
+const EXERTION_CYCLE_SECONDS = 0.9;
+const EXERTION_BOB_AMPLITUDE = 0.05;
+const IDLE_SWAY_FREQUENCY = 0.6;
+const IDLE_SWAY_AMPLITUDE = 0.02;
+const IDLE_GLANCE_FREQUENCY = 0.35;
+const IDLE_GLANCE_AMPLITUDE = 0.35;
+
+type NpcAttachmentOffset = { y: number; z: number };
+
+/** How far an NPC's rendered position sits relative to an owned machine's
+ * own base position while working out — matched to each hand-built model's
+ * actual seat/handle/belt height (see GymEquipmentModels.tsx) instead of
+ * always standing flat on the floor beside it. Visual-only: doesn't touch
+ * occupancy, timers, or arrival detection, only where the character appears
+ * relative to the (unmoved) equipment position. */
+const EQUIPMENT_NPC_OFFSETS: Record<string, NpcAttachmentOffset> = {
+  "rusty-dumbbell-rack": { y: 0, z: 0.35 },
+  "commercial-bench-press": { y: 0.4, z: 0 },
+  "squat-rack": { y: 0, z: 0 },
+  "cardio-treadmill": { y: 0.15, z: -0.15 },
+  "cable-crossover-tower": { y: 0, z: 0.2 },
+  "lat-pulldown-machine": { y: 0.5, z: 0.3 },
+};
+const DEFAULT_NPC_OFFSET: NpcAttachmentOffset = { y: 0, z: 0 };
+
+function getEquipmentNpcOffset(equipmentId: string | null): NpcAttachmentOffset {
+  if (!equipmentId) return DEFAULT_NPC_OFFSET;
+  return EQUIPMENT_NPC_OFFSETS[equipmentId] ?? DEFAULT_NPC_OFFSET;
+}
 
 export type NpcState =
   | "idle"
@@ -33,15 +82,27 @@ export type NpcRuntime = {
   target: [number, number, number];
   targetEquipmentId: string | null;
   stateTimer: number;
+  /** Everything below is visual-only — read by the render loop, never by
+   * updateNpc's state-machine logic. */
+  renderPosition: [number, number, number];
+  facingAngle: number;
+  /** Deterministic per-NPC phase offset (not Math.random(), matching this
+   * project's rule against randomness in anything that needs to stay
+   * stable) — spreads otherwise-identical looping animations across a
+   * couple of seconds so multiple NPCs never bob/sway in perfect unison. */
+  animationSeed: number;
 };
 
 export function createInitialNpcs(): NpcRuntime[] {
-  return NPC_COLORS.map(() => ({
+  return NPC_COLORS.map((_, index) => ({
     state: "idle",
     position: [...LOCKER_POSITION],
     target: [...LOCKER_POSITION],
     targetEquipmentId: null,
     stateTimer: 0,
+    renderPosition: [...LOCKER_POSITION],
+    facingAngle: 0,
+    animationSeed: index * 2.39,
   }));
 }
 
@@ -84,7 +145,9 @@ function pickRandomZoneLandmark(unlockedZones: string[]): [number, number, numbe
 /** Shared by regular member NPCs and GymStaff.tsx's role-specific patrols so
  * both use identical arrival/step math. `speedMultiplier` defaults to 1 for
  * staff (whose own walk speed isn't affected by the Janitor's bonus — that
- * bonus applies to regular members only). */
+ * bonus applies to regular members only). Unchanged by this pass — the
+ * logical step/arrival math that drives state transitions and economic
+ * timing stays exactly as it was. */
 export function moveToward(
   current: [number, number, number],
   target: [number, number, number],
@@ -104,6 +167,69 @@ export function moveToward(
     position: [current[0] + (dx / distance) * step, current[1], current[2] + (dz / distance) * step],
     arrived: false,
   };
+}
+
+/** Shortest-path angle interpolation (handles the -π/π wraparound so a
+ * character never spins the long way around) — exported so GymStaff.tsx's
+ * Trainer/Janitor can use the same turning smoothness. */
+export function lerpAngle(current: number, target: number, factor: number): number {
+  let diff = target - current;
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  return current + diff * factor;
+}
+
+function easeOutQuad(t: number): number {
+  return 1 - (1 - t) * (1 - t);
+}
+
+function easeInQuad(t: number): number {
+  return t * t;
+}
+
+/** Per-state idle/walk/exertion animation, purely additive on top of the
+ * smoothed render position — never touches the logical position. Walking
+ * gets a light footstep-like bob; working out gets an asymmetric "fast
+ * push, slower controlled return" shape instead of a symmetric sine, per the
+ * requested exertion-phase feel; waiting states get a slow lateral weight
+ * shift instead of a vertical bob, so each state reads visually distinct. */
+function getBobOffset(
+  state: NpcState,
+  animationSeed: number,
+  elapsedTime: number
+): { x: number; y: number } {
+  const t = elapsedTime + animationSeed;
+
+  switch (state) {
+    case "walkingToEquipment":
+    case "walkingToZone":
+    case "walkingToBar":
+      return { x: 0, y: Math.abs(Math.sin(t * WALK_BOB_FREQUENCY)) * WALK_BOB_AMPLITUDE };
+    case "workingOut": {
+      const cyclePosition = (t % EXERTION_CYCLE_SECONDS) / EXERTION_CYCLE_SECONDS;
+      const shaped =
+        cyclePosition < 0.3
+          ? easeOutQuad(cyclePosition / 0.3)
+          : 1 - easeInQuad((cyclePosition - 0.3) / 0.7);
+      return { x: 0, y: shaped * EXERTION_BOB_AMPLITUDE };
+    }
+    case "idle":
+    case "atZone":
+    case "recharging":
+      return { x: Math.sin(t * IDLE_SWAY_FREQUENCY) * IDLE_SWAY_AMPLITUDE, y: 0 };
+    default:
+      return { x: 0, y: 0 };
+  }
+}
+
+/** A small idle "glancing around" rotation layered on top of the frozen
+ * facing angle while waiting — only visible because of the shirt-front
+ * accent panel below (a bare capsule+sphere has no asymmetry to show
+ * rotation at all, which is also why regular walking/turning needed the
+ * facing-angle system to be paired with that panel in the first place). */
+function getIdleGlanceOffset(state: NpcState, animationSeed: number, elapsedTime: number): number {
+  if (state !== "idle" && state !== "atZone" && state !== "recharging") return 0;
+  return Math.sin((elapsedTime + animationSeed) * IDLE_GLANCE_FREQUENCY) * IDLE_GLANCE_AMPLITUDE;
 }
 
 function updateNpc(
@@ -241,11 +367,14 @@ export function GymNpcs({
   const onRechargedRef = useRef(onRecharged);
   onRechargedRef.current = onRecharged;
 
-  useFrame((_, delta) => {
+  useFrame(({ clock }, delta) => {
     const npcs = npcRuntimesRef.current;
     for (let i = 0; i < npcs.length; i++) {
+      const npc = npcs[i];
+      const previousPosition = npc.position;
+
       updateNpc(
-        npcs[i],
+        npc,
         delta,
         ownedIdsRef.current,
         unlockedZonesRef.current,
@@ -253,9 +382,40 @@ export function GymNpcs({
         speedMultiplierRef.current,
         () => onRechargedRef.current()
       );
+
+      // --- Visual-only from here: smoothing, facing, idle/exertion animation ---
+      const attachmentOffset =
+        npc.state === "workingOut" ? getEquipmentNpcOffset(npc.targetEquipmentId) : DEFAULT_NPC_OFFSET;
+      const targetX = npc.position[0];
+      const targetY = npc.position[1] + attachmentOffset.y;
+      const targetZ = npc.position[2] + attachmentOffset.z;
+
+      const followFactor = 1 - Math.exp(-POSITION_SMOOTHING_RATE * delta);
+      npc.renderPosition = [
+        npc.renderPosition[0] + (targetX - npc.renderPosition[0]) * followFactor,
+        npc.renderPosition[1] + (targetY - npc.renderPosition[1]) * followFactor,
+        npc.renderPosition[2] + (targetZ - npc.renderPosition[2]) * followFactor,
+      ];
+
+      const dx = npc.position[0] - previousPosition[0];
+      const dz = npc.position[2] - previousPosition[2];
+      if (Math.sqrt(dx * dx + dz * dz) > 0.001) {
+        const targetAngle = Math.atan2(dx, dz);
+        const rotationFactor = 1 - Math.exp(-ROTATION_SMOOTHING_RATE * delta);
+        npc.facingAngle = lerpAngle(npc.facingAngle, targetAngle, rotationFactor);
+      }
+
+      const bob = getBobOffset(npc.state, npc.animationSeed, clock.elapsedTime);
+      const idleGlance = getIdleGlanceOffset(npc.state, npc.animationSeed, clock.elapsedTime);
+
       const group = groupRefs.current[i];
       if (group) {
-        group.position.set(npcs[i].position[0], npcs[i].position[1], npcs[i].position[2]);
+        group.position.set(
+          npc.renderPosition[0] + bob.x,
+          npc.renderPosition[1] + bob.y,
+          npc.renderPosition[2]
+        );
+        group.rotation.y = npc.facingAngle + idleGlance;
       }
     }
   });
@@ -264,6 +424,7 @@ export function GymNpcs({
     <>
       {NPC_COLORS.map((color, i) => {
         const isSelected = selectedNpcId === getNpcId(i);
+        const accentColor = getAccentColor(i);
         return (
           <group
             key={color}
@@ -275,6 +436,18 @@ export function GymNpcs({
             <mesh position={[0, 0.5, 0]} castShadow>
               <capsuleGeometry args={[0.18, 0.4, 4, 8]} />
               <meshStandardMaterial color={color} roughness={0.5} metalness={0.1} />
+            </mesh>
+            {/* Accent "shorts" band — two-tone activewear look. */}
+            <mesh position={[0, 0.28, 0]} castShadow>
+              <cylinderGeometry args={[0.185, 0.185, 0.16, 8]} />
+              <meshStandardMaterial color={accentColor} roughness={0.6} metalness={0.05} />
+            </mesh>
+            {/* Accent "shirt front" panel — clothing variety, and the only
+             * reason facing rotation is visible at all on an otherwise
+             * rotationally-symmetric capsule body. */}
+            <mesh position={[0, 0.58, 0.15]} castShadow>
+              <boxGeometry args={[0.14, 0.18, 0.02]} />
+              <meshStandardMaterial color={accentColor} roughness={0.6} metalness={0.05} />
             </mesh>
             <mesh position={[0, 0.95, 0]} castShadow>
               <sphereGeometry args={[0.14, 12, 12]} />
