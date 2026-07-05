@@ -17,7 +17,13 @@ import {
   EQUIPMENT_GRID_TILE_SIZE as TILE_SIZE,
   getEquipmentWorldPosition,
 } from "@/constants/equipment";
-import { MAIN_FLOOR_ZONE_ID } from "@/constants/zones";
+import {
+  MAIN_FLOOR_ZONE_ID,
+  getPlayAreaBounds,
+  type PlayAreaBounds,
+  SMOOTHIE_BAR_POSITION,
+  LOCKER_POSITION,
+} from "@/constants/zones";
 import { SMOOTHIE_BAR_RECHARGE_CASH, CLERK_RECHARGE_MULTIPLIER, JANITOR_SPEED_MULTIPLIER } from "@/constants/staff";
 import { useUser } from "@/contexts/UserContext";
 import { GymEquipment } from "@/components/GymEquipmentModels";
@@ -108,38 +114,12 @@ const FLOOR_SIZE = 20;
 const TILES_PER_SIDE = 8;
 const TILE_SEAM_GAP = 0.06;
 
-const MAIN_FLOOR_HALF_SIZE = FLOOR_SIZE / 2;
 const WALL_HEIGHT = 4;
 const WALL_THICKNESS = 0.3;
 const WALL_INSET_FROM_NEON = 0.3;
 const PILLAR_SIZE = 0.4;
 const WALL_COLOR = "#2a2a2e";
 const PILLAR_COLOR = "#1e1e24";
-
-export type PlayAreaBounds = { minX: number; maxX: number; minZ: number; maxZ: number };
-
-/** The enclosing shell has to grow with the facility instead of staying
- * fixed at the 20x20 main floor — Cardio Deck ([15,0,0], 10x20) and Iron
- * Vault ([-15,0,-10], 10x10) both extend well past that boundary once
- * unlocked, and a fixed-size box would either occlude them behind a wall or
- * need to ignore them. This mirrors the same `unlockedZones`-driven growth
- * the camera's orbit radius already does. */
-function getPlayAreaBounds(unlockedZones: string[]): PlayAreaBounds {
-  let minX = -MAIN_FLOOR_HALF_SIZE;
-  let maxX = MAIN_FLOOR_HALF_SIZE;
-  let minZ = -MAIN_FLOOR_HALF_SIZE;
-  let maxZ = MAIN_FLOOR_HALF_SIZE;
-
-  if (unlockedZones.includes("cardio_deck")) {
-    maxX = 20;
-  }
-  if (unlockedZones.includes("iron_vault")) {
-    minX = Math.min(minX, -20);
-    minZ = Math.min(minZ, -15);
-  }
-
-  return { minX, maxX, minZ, maxZ };
-}
 
 export type NpcSnapshot = {
   name: string;
@@ -483,7 +463,7 @@ function GymWalls({ bounds }: { bounds: PlayAreaBounds }) {
 /** Smoothie Bar counter + stools — always present, not tied to any purchase. */
 function SmoothieBar() {
   return (
-    <group position={[-6, 0, -6]}>
+    <group position={SMOOTHIE_BAR_POSITION}>
       <mesh position={[0, 0.45, 0]} castShadow receiveShadow>
         <boxGeometry args={[1.6, 0.9, 0.6]} />
         <meshStandardMaterial color="#e8ddc7" roughness={0.25} metalness={0.15} />
@@ -505,7 +485,7 @@ function SmoothieBar() {
 /** Locker Room Door Block — a fixed environmental landmark, not purchasable. */
 function LockerRoomDoor() {
   return (
-    <group position={[6, 0, -6]}>
+    <group position={LOCKER_POSITION}>
       <mesh position={[0, 1.0, 0]} castShadow receiveShadow>
         <boxGeometry args={[1.1, 2.0, 0.15]} />
         <meshStandardMaterial color="#2f323b" roughness={0.5} metalness={0.2} />

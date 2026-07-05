@@ -1,4 +1,4 @@
-import type { PlayAreaBounds } from "@/components/GymFloor3D";
+import type { PlayAreaBounds } from "@/constants/zones";
 
 const MIRROR_FRAME_COLOR = "#f2f3f5";
 const MIRROR_GLASS_COLOR = "#c7cad1";

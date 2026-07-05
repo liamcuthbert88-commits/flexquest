@@ -2,8 +2,8 @@ import { useRef, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber/native";
 import type { Group } from "three";
 import { EQUIPMENT_CATALOG, getEquipmentWorldPosition } from "@/constants/equipment";
-import { ZONE_LANDMARKS, MAIN_FLOOR_ZONE_ID } from "@/constants/zones";
-import { moveToward, SMOOTHIE_BAR_POSITION } from "@/components/GymNpcs";
+import { ZONE_LANDMARKS, MAIN_FLOOR_ZONE_ID, SMOOTHIE_BAR_POSITION } from "@/constants/zones";
+import { moveToward } from "@/components/GymNpcs";
 
 const CLERK_PACE_RANGE = 0.8;
 const CLERK_PACE_SPEED = 0.5;

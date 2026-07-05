@@ -2,14 +2,12 @@ import { useRef, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber/native";
 import type { Group } from "three";
 import { EQUIPMENT_CATALOG, getEquipmentWorldPosition } from "@/constants/equipment";
-import { ZONE_LANDMARKS, MAIN_FLOOR_ZONE_ID } from "@/constants/zones";
+import { ZONE_LANDMARKS, MAIN_FLOOR_ZONE_ID, SMOOTHIE_BAR_POSITION, LOCKER_POSITION } from "@/constants/zones";
 
 export const NPC_COLORS = ["#F97316", "#22D3EE", "#E879F9"];
 /** Fixed, not randomized — an NPC should keep the same name every time it's selected. */
 export const NPC_NAMES = ["Gains Goblin", "Rep Reaper", "Cardio Crusher"];
 
-export const LOCKER_POSITION: [number, number, number] = [6, 0, -6];
-export const SMOOTHIE_BAR_POSITION: [number, number, number] = [-6, 0, -6];
 export const WALK_SPEED = 1.2;
 const ARRIVAL_THRESHOLD = 0.15;
 const WORKOUT_DURATION_SECONDS = 5;
