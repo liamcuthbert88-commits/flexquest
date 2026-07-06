@@ -117,7 +117,6 @@ const RADIUS_EASE_SPEED = 1.5;
 const MIN_POLAR = 0.2;
 const MAX_POLAR = Math.PI / 2 - 0.05;
 const NEON_COLOR = "#8B5CF6";
-const CARDIO_BLUE = "#38BDF8";
 const OVERHEAD_WASH_COLOR = "#f8f9fa";
 const LED_FIXTURE_COLOR = "#ffffff";
 
@@ -1241,42 +1240,6 @@ function LockerRoomDoor() {
   );
 }
 
-/** Cardio Deck — shares the same tiled floor as the rest of the facility
- * (see TiledFloor); a thin neon-blue border traces the zone's perimeter to
- * mark its footprint, matching NeonPerimeter's own border-strip technique
- * rather than a full glowing slab. A previous version covered the *entire*
- * 10x20 zone with one bright emissive plane (plus GlowLayer's additive
- * bloom scaled to that same full size) — harmless against the old
- * medium-grey floor, but read as a glaring, out-of-place blue rectangle
- * once the tile floor darkened to near-black rubber. Thin border strips at
- * a much lower emissive intensity keep the zone identifiable without
- * fighting the now much darker, more uniform-reading floor. */
-function CardioDeckZone() {
-  const halfWidth = 5;
-  const halfDepth = 10;
-  const stripThickness = 0.15;
-
-  const strips: { position: [number, number, number]; size: [number, number, number] }[] = [
-    { position: [0, 0.04, -halfDepth], size: [halfWidth * 2, 0.05, stripThickness] },
-    { position: [0, 0.04, halfDepth], size: [halfWidth * 2, 0.05, stripThickness] },
-    { position: [-halfWidth, 0.04, 0], size: [stripThickness, 0.05, halfDepth * 2] },
-    { position: [halfWidth, 0.04, 0], size: [stripThickness, 0.05, halfDepth * 2] },
-  ];
-
-  return (
-    <group position={[15, 0, 0]}>
-      {strips.map((strip, i) => (
-        <mesh key={i} position={strip.position}>
-          <boxGeometry args={strip.size} />
-          <meshStandardMaterial color={CARDIO_BLUE} emissive={CARDIO_BLUE} emissiveIntensity={0.5} />
-        </mesh>
-      ))}
-      {strips.map((strip, i) => (
-        <GlowLayer key={`glow-${i}`} position={strip.position} size={strip.size} color={CARDIO_BLUE} />
-      ))}
-    </group>
-  );
-}
 
 /** Illuminates one piece of equipment with a downward spotlight cone —
  * deliberately NOT `castShadow` (see the perf note on GRAPHICS_ROADMAP.md
@@ -1806,7 +1769,6 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
         <NeonPerimeter bounds={playAreaBounds} />
         <SmoothieBar />
         <LockerRoomDoor />
-        {unlockedZones.includes("cardio_deck") && <CardioDeckZone />}
 
         {ownedEquipment.map((item) => {
           const position = getEquipmentWorldPosition(item, equipmentCustomizations);
