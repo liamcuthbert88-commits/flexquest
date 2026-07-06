@@ -12,17 +12,19 @@ const config = getDefaultConfig(__dirname);
  * — two "instances" of three.js loaded, tripping its own runtime check
  * ("THREE.WARNING: Multiple instances of Three.js being imported").
  *
- * Forcing every resolution of the bare `three` specifier through the
- * "require" condition only (three.cjs) makes it irrelevant which import
- * syntax any given consumer uses — everyone lands on the same file. */
+ * An earlier attempt delegated back to `context.resolveRequest` with an
+ * `unstable_conditionNames` override on a spread-copied context — Metro
+ * silently ignored it (verified: the resulting bundle still contained both
+ * three.module.js and three.core.js). Returning a `sourceFile` resolution
+ * directly, bypassing condition/exports resolution entirely, actually
+ * works — every resolution of the bare `three` specifier lands on the
+ * exact same absolute file regardless of which import syntax the consumer
+ * used. */
+const threeCjsPath = require.resolve("three");
 const defaultResolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (moduleName === "three") {
-    return context.resolveRequest(
-      { ...context, unstable_conditionNames: ["require"] },
-      moduleName,
-      platform
-    );
+    return { type: "sourceFile", filePath: threeCjsPath };
   }
   return defaultResolveRequest
     ? defaultResolveRequest(context, moduleName, platform)
