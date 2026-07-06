@@ -356,25 +356,16 @@ export function UserProvider({ children }: { children: ReactNode }) {
     return { leveledUp: false, newGymLevel: gymLevel };
   }
 
-  const DEV_CASH_INJECTION = 10_000_000;
-  const DEV_RENOWN_INJECTION = 5000;
-  /** Highest requiredLevel across EQUIPMENT_CATALOG/LOCATION_CATALOG today —
-   * kept as a floor (not an additive amount) so every shop lock reads true. */
-  const DEV_LEVEL_FLOOR = 20;
+  const DEV_CASH_INJECTION = 1000;
+  const DEV_XP_INJECTION = 150;
 
-  /** Dev-only sandbox cheat for testing late-game pricing/configurations
-   * without grinding. Bypasses `creditCash` (this isn't "earned") and reuses
-   * `addRenown`'s existing rollover math so a big renown injection correctly
-   * fast-forwards `gymLevel` too. Equipment purchases gate on the *separate*
-   * `level` stat (workout XP), not `gymLevel` — only bumping renown left
-   * Treadmill/Cable Crossover/Lat Pulldown still locked, so `level` gets an
-   * explicit floor here too. No-ops outside dev builds regardless of caller. */
+  /** Dev-only sandbox cheat: a small, repeatable cash+XP bump per tap for
+   * incremental testing. Bypasses `creditCash` (this isn't "earned").
+   * No-ops outside dev builds regardless of caller. */
   function injectDevRiches() {
     if (!__DEV__) return;
     setCash((prev) => prev + DEV_CASH_INJECTION);
-    addRenown(DEV_RENOWN_INJECTION);
-    setLevel((prev) => Math.max(prev, DEV_LEVEL_FLOOR));
-    setGymLevel((prev) => Math.max(prev, DEV_LEVEL_FLOOR));
+    addXp(DEV_XP_INJECTION);
   }
 
   /** Dev-only sandbox reset — wipes the save file and every stat back to a

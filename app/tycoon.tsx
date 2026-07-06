@@ -135,11 +135,11 @@ export default function TycoonScreen() {
 
   function handleDevRiches() {
     injectDevRiches();
-    const message = "Sandbox Mode Activated: +$10M";
+    const message = "+$1,000 cash and +150 XP injected.";
     if (Platform.OS === "web") {
       if (typeof window !== "undefined") window.alert(message);
     } else {
-      Alert.alert(message, "+$10,000,000 cash and +5,000 Renown injected.");
+      Alert.alert("Sandbox Mode", message);
     }
   }
 
