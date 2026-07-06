@@ -36,6 +36,7 @@ import {
   getPlayAreaBounds,
   type PlayAreaBounds,
   SMOOTHIE_BAR_POSITION,
+  EXTERIOR_RING_WIDTH,
 } from "@/constants/zones";
 import { SMOOTHIE_BAR_RECHARGE_CASH, CLERK_RECHARGE_MULTIPLIER, JANITOR_SPEED_MULTIPLIER } from "@/constants/staff";
 import { useUser } from "@/contexts/UserContext";
@@ -51,6 +52,7 @@ import {
 } from "@/components/GymNpcs";
 import { GymStaff } from "@/components/GymStaff";
 import { GymDecor } from "@/components/GymDecor";
+import { GymExterior } from "@/components/GymExterior";
 
 type LocationMood = {
   ambientColor: string;
@@ -599,7 +601,23 @@ function CameraRig({
       angleDifference(azimuthTargetRef.current, azimuthRef.current) *
       Math.min(1, delta * AZIMUTH_EASE_RATE);
 
-    const orbitRadius = currentRadiusRef.current + zoomOffsetRef.current;
+    // Redundant guard, not today's binding constraint: with current zoom
+    // constants (MAX_ZOOM_OFFSET=6, BASE_ORBIT_RADIUS=9,
+    // ORBIT_RADIUS_PER_ZONE=3), the pre-existing zoom-out limit
+    // (BASE_ORBIT_RADIUS + ORBIT_RADIUS_PER_ZONE*zones + MAX_ZOOM_OFFSET)
+    // always stays below this cap at every zone count (0-4 zones owned) —
+    // verified: cap is 24+2.5*zones, the existing limit is 15+3*zones, and
+    // the difference stays positive throughout that range. The actual "no
+    // visible void" guarantee today comes from GymExterior's large ground
+    // plane, not this cap. This cap exists as future-proofing: if
+    // MAX_ZOOM_OFFSET or the zone count ever grows enough to let the
+    // camera zoom out further than it can today, this still prevents it
+    // from seeing past the exterior scenery's outer edge.
+    const rawOrbitRadius = currentRadiusRef.current + zoomOffsetRef.current;
+    const bounds = boundsRef.current;
+    const maxOrbitRadius =
+      Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) / 2 + EXTERIOR_RING_WIDTH;
+    const orbitRadius = Math.min(rawOrbitRadius, maxOrbitRadius);
     const targetPolar = getZoomLinkedPolar(orbitRadius);
     polarRef.current += (targetPolar - polarRef.current) * Math.min(1, delta * POLAR_EASE_RATE);
     // Larger polar = lower camera height (∝ cos(polar)) — flooring it here
@@ -1797,6 +1815,7 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
 
         <GymBackdrop prestigeCount={prestigeCount} windowColor={mood.windowColor} />
 
+        <GymExterior bounds={playAreaBounds} />
         <TiledFloor
           key={`${playAreaBounds.minX}-${playAreaBounds.maxX}-${playAreaBounds.minZ}-${playAreaBounds.maxZ}`}
           bounds={playAreaBounds}
