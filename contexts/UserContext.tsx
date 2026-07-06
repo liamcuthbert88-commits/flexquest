@@ -54,7 +54,7 @@ type PersistedUserStats = {
   hiredManagerIds: string[];
   renownPoints: number;
   gymLevel: number;
-  completedChallenges: Record<string, string>;
+  completedChallenges?: Record<string, string>;
   prestigeCount: number;
   currentLocationId: string;
   lifetimeCashEarned: number;
@@ -76,8 +76,6 @@ function isValidPersistedStats(value: unknown): value is PersistedUserStats {
     Array.isArray(stats.hiredManagerIds) &&
     typeof stats.renownPoints === "number" &&
     typeof stats.gymLevel === "number" &&
-    typeof stats.completedChallenges === "object" &&
-    stats.completedChallenges !== null &&
     typeof stats.prestigeCount === "number" &&
     typeof stats.currentLocationId === "string" &&
     typeof stats.lifetimeCashEarned === "number" &&
@@ -176,7 +174,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
         setHiredManagerIds(stored.hiredManagerIds);
         setRenownPoints(stored.renownPoints);
         setGymLevel(stored.gymLevel);
-        setCompletedChallenges(stored.completedChallenges);
+        setCompletedChallenges(
+          typeof stored.completedChallenges === "object" && stored.completedChallenges !== null
+            ? stored.completedChallenges
+            : {}
+        );
         setPrestigeCount(stored.prestigeCount);
         setCurrentLocationId(stored.currentLocationId);
         setLifetimeCashEarned(stored.lifetimeCashEarned);
