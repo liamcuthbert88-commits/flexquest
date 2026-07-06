@@ -7,24 +7,29 @@ import {
   type EquipmentCustomization,
 } from "@/constants/equipment";
 import { ZONE_LANDMARKS, MAIN_FLOOR_ZONE_ID, SMOOTHIE_BAR_POSITION } from "@/constants/zones";
-import { moveToward } from "@/components/GymNpcs";
+import { lerpAngle, moveToward } from "@/components/GymNpcs";
 
 const CLERK_PACE_RANGE = 0.8;
 const CLERK_PACE_SPEED = 0.5;
 const TRAINER_RETARGET_INTERVAL_SECONDS = 4;
 const IRON_VAULT_CENTER: [number, number, number] = [-15, 0, -10];
 const MAIN_FLOOR_LANDMARK: [number, number, number] = [0, 0, 6];
+const ROTATION_SMOOTHING_RATE = 6;
 
 type TrainerRuntime = {
   position: [number, number, number];
   target: [number, number, number];
   retargetTimer: number;
+  /** Visual-only, same technique as GymNpcs.tsx — visible here thanks to the
+   * clipboard prop's asymmetry, unlike a bare capsule. */
+  facingAngle: number;
 };
 
 type JanitorRuntime = {
   position: [number, number, number];
   target: [number, number, number];
   landmarkIndex: number;
+  facingAngle: number;
 };
 
 /** Regular capsule+head rig, matching GymNpcs — the role distinction comes
@@ -64,11 +69,13 @@ export function GymStaff({ hiredStaffIds, unlockedZones, occupancyRef, equipment
     position: [...IRON_VAULT_CENTER],
     target: [...IRON_VAULT_CENTER],
     retargetTimer: 0,
+    facingAngle: 0,
   });
   const janitorRuntime = useRef<JanitorRuntime>({
     position: [...MAIN_FLOOR_LANDMARK],
     target: [...MAIN_FLOOR_LANDMARK],
     landmarkIndex: 0,
+    facingAngle: 0,
   });
 
   const hiredStaffIdsRef = useRef(hiredStaffIds);
@@ -105,10 +112,24 @@ export function GymStaff({ hiredStaffIds, unlockedZones, occupancyRef, equipment
             : IRON_VAULT_CENTER;
       }
 
+      const previousPosition = runtime.position;
       const { position } = moveToward(runtime.position, runtime.target, delta);
       runtime.position = position;
+
+      const dx = position[0] - previousPosition[0];
+      const dz = position[2] - previousPosition[2];
+      if (Math.sqrt(dx * dx + dz * dz) > 0.001) {
+        const targetAngle = Math.atan2(dx, dz);
+        runtime.facingAngle = lerpAngle(
+          runtime.facingAngle,
+          targetAngle,
+          1 - Math.exp(-ROTATION_SMOOTHING_RATE * delta)
+        );
+      }
+
       if (trainerGroupRef.current) {
         trainerGroupRef.current.position.set(position[0], position[1], position[2]);
+        trainerGroupRef.current.rotation.y = runtime.facingAngle;
       }
       if (trainerClipboardRef.current) {
         trainerClipboardRef.current.rotation.z = Math.sin(clock.elapsedTime * 2) * 0.15;
@@ -124,14 +145,28 @@ export function GymStaff({ hiredStaffIds, unlockedZones, occupancyRef, equipment
           .map((id) => ZONE_LANDMARKS[id]),
       ];
 
+      const previousPosition = runtime.position;
       const { position, arrived } = moveToward(runtime.position, runtime.target, delta);
       runtime.position = position;
       if (arrived) {
         runtime.landmarkIndex = (runtime.landmarkIndex + 1) % landmarks.length;
         runtime.target = landmarks[runtime.landmarkIndex];
       }
+
+      const dx = position[0] - previousPosition[0];
+      const dz = position[2] - previousPosition[2];
+      if (Math.sqrt(dx * dx + dz * dz) > 0.001) {
+        const targetAngle = Math.atan2(dx, dz);
+        runtime.facingAngle = lerpAngle(
+          runtime.facingAngle,
+          targetAngle,
+          1 - Math.exp(-ROTATION_SMOOTHING_RATE * delta)
+        );
+      }
+
       if (janitorGroupRef.current) {
         janitorGroupRef.current.position.set(position[0], position[1], position[2]);
+        janitorGroupRef.current.rotation.y = runtime.facingAngle;
       }
     }
   });

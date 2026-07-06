@@ -1,15 +1,14 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import {
   Alert,
-  Animated,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,
   type GestureResponderEvent,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -18,7 +17,10 @@ import { AnimatedCashCounter } from "@/components/AnimatedCashCounter";
 import { AnimatedProgressBar } from "@/components/AnimatedProgressBar";
 import { EmpireSnapshotModal } from "@/components/EmpireSnapshotModal";
 import { FloatingCashPopupLayer, type CashPopup } from "@/components/FloatingCashPopup";
+import { GymBottomNav, type GymPageKey } from "@/components/GymBottomNav";
 import { GymFloor3D, type Selection } from "@/components/GymFloor3D";
+import { GymTopBar } from "@/components/GymTopBar";
+import { NPC_NAMES } from "@/components/GymNpcs";
 import { InspectorPanel } from "@/components/InspectorPanel";
 import { PrestigeModal } from "@/components/PrestigeModal";
 import { ShopItemCard } from "@/components/ShopItemCard";
@@ -33,9 +35,9 @@ import { STAFF_CATALOG } from "@/constants/staff";
 import { MOCK_LEADERBOARD, sanitizeLeaderboardEntry } from "@/constants/leaderboard";
 import { useUser, type PurchaseResult } from "@/contexts/UserContext";
 
-type TabKey = "equipment" | "upgrades" | "managers" | "zones" | "staff";
+type ShopTabKey = "equipment" | "upgrades" | "managers" | "zones" | "staff";
 
-const TABS: { key: TabKey; label: string }[] = [
+const SHOP_TABS: { key: ShopTabKey; label: string }[] = [
   { key: "equipment", label: "Equipment 🏋️" },
   { key: "upgrades", label: "Facility Upgrades ⚡" },
   { key: "managers", label: "Staff Managers 👥" },
@@ -74,25 +76,14 @@ export default function TycoonScreen() {
     setEquipmentColor,
     rotateEquipment,
   } = useUser();
-  const [activeTab, setActiveTab] = useState<TabKey>("equipment");
+  const [activePage, setActivePage] = useState<GymPageKey>("gymFloor");
+  const [activeShopTab, setActiveShopTab] = useState<ShopTabKey>("equipment");
   const [isPrestigeModalVisible, setPrestigeModalVisible] = useState(false);
   const [isSnapshotModalVisible, setSnapshotModalVisible] = useState(false);
   const [cashPopups, setCashPopups] = useState<CashPopup[]>([]);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [isEditingEquipment, setIsEditingEquipment] = useState(false);
   const [placingEquipmentId, setPlacingEquipmentId] = useState<string | null>(null);
-  const { height: windowHeight } = useWindowDimensions();
-  const scrollY = useRef(new Animated.Value(0)).current;
-  const gymLevelCardScale = scrollY.interpolate({
-    inputRange: [0, 100],
-    outputRange: [1, 0.94],
-    extrapolate: "clamp",
-  });
-  const gymLevelCardOpacity = scrollY.interpolate({
-    inputRange: [0, 100],
-    outputRange: [1, 0.85],
-    extrapolate: "clamp",
-  });
 
   const renownFillPercent = Math.min(100, Math.max(0, (renownPoints / renownToNextGymLevel) * 100));
 
@@ -149,286 +140,318 @@ export default function TycoonScreen() {
     }
   }
 
+  /** Leaving the Gym Floor tab clears the 3D selection rather than leaving it
+   * stale: GymFloor3D fully unmounts when its tab isn't active (see below),
+   * so its own internal selection ring resets to nothing on remount — if
+   * this screen's `selection` weren't also cleared, returning to the tab
+   * would show the Inspector Panel for an item with no visible highlight in
+   * the freshly-mounted scene, an inconsistent state. */
+  function handleSelectPage(page: GymPageKey) {
+    if (page !== "gymFloor") {
+      setSelection(null);
+      setIsEditingEquipment(false);
+    }
+    setActivePage(page);
+  }
+
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
-        </Pressable>
-        <Text style={styles.headerTitle}>My Gym 🏢</Text>
-        <View style={styles.headerRightGroup}>
-          {__DEV__ && (
-            <Pressable onPress={handleDevRiches} hitSlop={8} style={styles.devButton}>
-              <Text style={styles.devButtonText}>DEV 🔧</Text>
-            </Pressable>
-          )}
-          <Pressable
-            onPress={() => setSnapshotModalVisible(true)}
-            hitSlop={12}
-            style={styles.backButton}
-          >
-            <Ionicons name="camera-outline" size={22} color={colors.textPrimary} />
-          </Pressable>
-        </View>
-      </View>
+    <SafeAreaView style={styles.safeArea} edges={["top", "left", "right", "bottom"]}>
+      <GymTopBar
+        cash={cash}
+        gymLevel={gymLevel}
+        memberCount={NPC_NAMES.length}
+        onBack={() => router.back()}
+        onSnapshot={() => setSnapshotModalVisible(true)}
+        onDevRiches={handleDevRiches}
+      />
 
-      <Animated.View
-        style={[
-          styles.gymLevelCard,
-          { transform: [{ scale: gymLevelCardScale }], opacity: gymLevelCardOpacity },
-        ]}
-      >
-        <View style={styles.gymLevelTopRow}>
-          <View>
-            <Text style={typography.label}>{currentLocation.name.toUpperCase()}</Text>
-            <Text style={styles.gymLevelValue}>Level {gymLevel}</Text>
+      <View style={styles.pageContainer}>
+        {activePage === "gymFloor" && (
+          <View style={styles.gymFloorPage}>
+            {/* Conditionally mounted, not just hidden — while any other tab is
+             * active there is no Canvas, no GL context, and no useFrame loop
+             * running at all for the 3D scene: the most complete "pause"
+             * available, satisfying the battery-life goal literally rather
+             * than approximately. The trade-off is that NPC positions, camera
+             * angle/zoom, and any 3D selection reset each time you return —
+             * expected tab-switch behavior, not a bug. The core economic tick
+             * (cashPerSecond) lives in UserContext, mounted at the app root,
+             * and is completely unaffected by this — it isn't tied to NPCs
+             * actually being simulated. The one real side effect: the Clerk's
+             * small Smoothie-Bar-recharge cash bonus pauses along with NPC
+             * simulation while away from this tab, since that requires an
+             * NPC to actually complete a recharge cycle to fire. */}
+            <GymFloor3D
+              onSelect={(next) => {
+                setSelection(next);
+                setIsEditingEquipment(false);
+              }}
+              placingEquipmentId={placingEquipmentId}
+              onPlacementSettled={() => setPlacingEquipmentId(null)}
+            />
+            <InspectorPanel
+              selection={selection}
+              onClose={() => {
+                setSelection(null);
+                setIsEditingEquipment(false);
+              }}
+              isEditing={isEditingEquipment}
+              onToggleEdit={() => setIsEditingEquipment((prev) => !prev)}
+              onSetColor={setEquipmentColor}
+              onRotate={rotateEquipment}
+              onStartMove={(equipmentId) => setPlacingEquipmentId(equipmentId)}
+              onUpgrade={handleUpgradeEquipment}
+            />
           </View>
-          <View style={styles.gymLevelBadge}>
-            <Ionicons name="star" size={22} color={colors.accentRenown} />
-          </View>
-        </View>
-
-        <View style={styles.renownRow}>
-          <AnimatedProgressBar percent={renownFillPercent} color={colors.accentRenown} />
-          <Text style={styles.renownLabel}>
-            {renownPoints} / {renownToNextGymLevel} Renown
-          </Text>
-        </View>
-
-        {canPrestige && (
-          <Pressable style={styles.prestigeButton} onPress={() => setPrestigeModalVisible(true)}>
-            <Ionicons name="trending-up" size={16} color={colors.background} />
-            <Text style={styles.prestigeButtonText}>Prestige Available: {nextLocation.name}</Text>
-          </Pressable>
         )}
-      </Animated.View>
 
-      <View style={[styles.gymFloorContainer, { height: windowHeight * 0.4 }]}>
-        <GymFloor3D
-          onSelect={(next) => {
-            setSelection(next);
-            setIsEditingEquipment(false);
-          }}
-          placingEquipmentId={placingEquipmentId}
-          onPlacementSettled={() => setPlacingEquipmentId(null)}
-        />
-      </View>
-
-      <Animated.ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
-          useNativeDriver: true,
-        })}
-        scrollEventThrottle={16}
-      >
-        <View style={styles.section}>
-          <Text style={typography.label}>ACTIVE CHALLENGES 🎯</Text>
-          <View style={styles.questList}>
-            {QUEST_CATALOG.map((quest) => {
-              const isComplete = completedQuestIds.includes(quest.id);
-              const progress = quest.getProgress({
-                purchasedEquipmentIds,
-                hiredManagerIds,
-                cashPerSecond,
-                finishedWorkoutExerciseNames: [],
-              });
-
-              return (
-                <View
-                  key={quest.id}
-                  style={[styles.questCard, isComplete && styles.questCardComplete]}
-                >
-                  <View style={styles.questIconBadge}>
-                    <Ionicons
-                      name={isComplete ? "checkmark-circle" : "flag-outline"}
-                      size={20}
-                      color={isComplete ? colors.success : colors.accentRenown}
-                    />
-                  </View>
-
-                  <View style={styles.questInfo}>
-                    <Text style={styles.questTitle}>{quest.title}</Text>
-                    <Text style={styles.questDescription}>{quest.description}</Text>
-                    <Text style={styles.questProgress}>
-                      {isComplete
-                        ? "Reward claimed!"
-                        : `${progress.current}/${progress.target}`}
-                    </Text>
-                  </View>
-
-                  <View style={styles.questReward}>
-                    <Text style={styles.questRewardCash}>${quest.rewardCash}</Text>
-                    <Text style={styles.questRewardRenown}>+{quest.rewardRenown} Renown</Text>
-                  </View>
+        {activePage === "shop" && (
+          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            <View style={styles.gymLevelCard}>
+              <View style={styles.gymLevelTopRow}>
+                <View>
+                  <Text style={typography.label}>{currentLocation.name.toUpperCase()}</Text>
+                  <Text style={styles.gymLevelValue}>Level {gymLevel}</Text>
                 </View>
-              );
-            })}
-          </View>
-        </View>
+                <View style={styles.gymLevelBadge}>
+                  <Ionicons name="star" size={22} color={colors.accentRenown} />
+                </View>
+              </View>
 
-        <Pressable style={styles.cashCard} onPress={handleCollectTap}>
-          <Text style={typography.label}>CASH BALANCE</Text>
-          <AnimatedCashCounter value={cash} style={styles.cashValue} />
-          {cashPerSecond > 0 && (
-            <Text style={styles.cashRate}>+${cashPerSecond.toFixed(1)}/sec idle income</Text>
-          )}
-          <Text style={styles.cashTapHint}>Tap to collect +${TAP_BONUS_CASH}</Text>
-          <FloatingCashPopupLayer popups={cashPopups} onPopupComplete={handlePopupComplete} />
-        </Pressable>
-
-        <View style={styles.tabRow}>
-          {TABS.map((tab) => {
-            const isActive = tab.key === activeTab;
-            return (
-              <Pressable
-                key={tab.key}
-                onPress={() => setActiveTab(tab.key)}
-                style={[styles.tabPill, isActive && styles.tabPillActive]}
-              >
-                <Text style={[styles.tabPillText, isActive && styles.tabPillTextActive]}>
-                  {tab.label}
+              <View style={styles.renownRow}>
+                <AnimatedProgressBar percent={renownFillPercent} color={colors.accentRenown} />
+                <Text style={styles.renownLabel}>
+                  {renownPoints} / {renownToNextGymLevel} Renown
                 </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+              </View>
 
-        {activeTab === "equipment" && (
-          <View style={styles.itemList}>
-            {EQUIPMENT_CATALOG.map((item) => {
-              const isOwned = purchasedEquipmentIds.includes(item.id);
-              const isLevelLocked = level < item.requiredLevel;
-              return (
-                <ShopItemCard
-                  key={item.id}
-                  icon="barbell-outline"
-                  name={item.name}
-                  subtitle={`$${item.cost} · +$${item.cashPerSecond}/sec`}
-                  cost={item.cost}
-                  isOwned={isOwned}
-                  lockedReason={isLevelLocked ? `Requires Lv ${item.requiredLevel}` : undefined}
-                  canAfford={cash >= item.cost}
-                  onBuy={() => handlePurchaseResult(buyEquipment(item.id))}
-                />
-              );
-            })}
-          </View>
-        )}
+              {canPrestige && (
+                <Pressable style={styles.prestigeButton} onPress={() => setPrestigeModalVisible(true)}>
+                  <Ionicons name="trending-up" size={16} color={colors.background} />
+                  <Text style={styles.prestigeButtonText}>Prestige Available: {nextLocation.name}</Text>
+                </Pressable>
+              )}
+            </View>
 
-        {activeTab === "upgrades" && (
-          <View style={styles.itemList}>
-            {UPGRADE_CATALOG.map((item) => {
-              const isOwned = purchasedUpgradeIds.includes(item.id);
-              return (
-                <ShopItemCard
-                  key={item.id}
-                  icon="flash-outline"
-                  name={item.name}
-                  subtitle={`$${item.cost} · +${item.cashBonus * 100}% workout cash`}
-                  cost={item.cost}
-                  isOwned={isOwned}
-                  canAfford={cash >= item.cost}
-                  onBuy={() => handlePurchaseResult(buyUpgrade(item.id))}
-                />
-              );
-            })}
-          </View>
-        )}
+            <Pressable style={styles.cashCard} onPress={handleCollectTap}>
+              <Text style={typography.label}>CASH BALANCE</Text>
+              <AnimatedCashCounter value={cash} style={styles.cashValue} />
+              {cashPerSecond > 0 && (
+                <Text style={styles.cashRate}>+${cashPerSecond.toFixed(1)}/sec idle income</Text>
+              )}
+              <Text style={styles.cashTapHint}>Tap to collect +${TAP_BONUS_CASH}</Text>
+              <FloatingCashPopupLayer popups={cashPopups} onPopupComplete={handlePopupComplete} />
+            </Pressable>
 
-        {activeTab === "managers" && (
-          <View style={styles.itemList}>
-            {MANAGER_CATALOG.map((item) => {
-              const isOwned = hiredManagerIds.includes(item.id);
-              return (
-                <ShopItemCard
-                  key={item.id}
-                  icon="people-outline"
-                  name={item.name}
-                  subtitle={`$${item.cost} · +$${item.cashPerSecond}/sec`}
-                  cost={item.cost}
-                  isOwned={isOwned}
-                  canAfford={cash >= item.cost}
-                  onBuy={() => handlePurchaseResult(hireManager(item.id))}
-                />
-              );
-            })}
-          </View>
-        )}
-
-        {activeTab === "zones" && (
-          <View style={styles.itemList}>
-            {ZONE_CATALOG.map((zone) => {
-              const isOwned = unlockedZones.includes(zone.id);
-              const isLevelLocked = gymLevel < zone.requiredLevel;
-              return (
-                <ShopItemCard
-                  key={zone.id}
-                  icon="business-outline"
-                  name={zone.name}
-                  subtitle={`$${zone.cost}`}
-                  cost={zone.cost}
-                  isOwned={isOwned}
-                  lockedReason={isLevelLocked ? `Requires Gym Lv ${zone.requiredLevel}` : undefined}
-                  canAfford={cash >= zone.cost}
-                  onBuy={() => handlePurchaseResult(buyZone(zone.id))}
-                />
-              );
-            })}
-          </View>
-        )}
-
-        {activeTab === "staff" && (
-          <View style={styles.itemList}>
-            {STAFF_CATALOG.map((staff) => {
-              const isOwned = hiredStaffIds.includes(staff.id);
-              return (
-                <ShopItemCard
-                  key={staff.id}
-                  icon="ribbon-outline"
-                  name={`${staff.role} — ${staff.name}`}
-                  subtitle={`${staff.operationalZone} · ${staff.description}`}
-                  cost={staff.cost}
-                  isOwned={isOwned}
-                  canAfford={cash >= staff.cost}
-                  onBuy={() => handlePurchaseResult(hireStaff(staff.id))}
-                />
-              );
-            })}
-          </View>
-        )}
-
-        <View style={styles.section}>
-          <Text style={typography.label}>GLOBAL LEADERBOARD 🏆</Text>
-          <View style={styles.leaderboardList}>
-            {leaderboardEntries.map((entry, index) => {
-              const isPlayer = entry.name === "You";
-              return (
-                <View
-                  key={`${entry.name}-${index}`}
-                  style={[styles.leaderboardRow, isPlayer && styles.leaderboardRowPlayer]}
-                >
-                  <Text style={[styles.leaderboardRank, isPlayer && styles.leaderboardTextPlayer]}>
-                    #{index + 1}
-                  </Text>
-                  <Text
-                    style={[styles.leaderboardName, isPlayer && styles.leaderboardTextPlayer]}
-                    numberOfLines={1}
+            <View style={styles.tabRow}>
+              {SHOP_TABS.map((tab) => {
+                const isActive = tab.key === activeShopTab;
+                return (
+                  <Pressable
+                    key={tab.key}
+                    onPress={() => setActiveShopTab(tab.key)}
+                    style={[styles.tabPill, isActive && styles.tabPillActive]}
                   >
-                    {entry.name}
-                  </Text>
-                  <Text style={[styles.leaderboardStat, isPlayer && styles.leaderboardTextPlayer]}>
-                    {entry.renownPoints} Renown
-                  </Text>
-                  <Text style={[styles.leaderboardStat, isPlayer && styles.leaderboardTextPlayer]}>
-                    Prestige {entry.prestigeCount}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
-        </View>
-      </Animated.ScrollView>
+                    <Text style={[styles.tabPillText, isActive && styles.tabPillTextActive]}>
+                      {tab.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {activeShopTab === "equipment" && (
+              <View style={styles.itemList}>
+                {EQUIPMENT_CATALOG.map((item) => {
+                  const isOwned = purchasedEquipmentIds.includes(item.id);
+                  const isLevelLocked = level < item.requiredLevel;
+                  return (
+                    <ShopItemCard
+                      key={item.id}
+                      icon="barbell-outline"
+                      name={item.name}
+                      subtitle={`$${item.cost} · +$${item.cashPerSecond}/sec`}
+                      cost={item.cost}
+                      isOwned={isOwned}
+                      lockedReason={isLevelLocked ? `Requires Lv ${item.requiredLevel}` : undefined}
+                      canAfford={cash >= item.cost}
+                      onBuy={() => handlePurchaseResult(buyEquipment(item.id))}
+                    />
+                  );
+                })}
+              </View>
+            )}
+
+            {activeShopTab === "upgrades" && (
+              <View style={styles.itemList}>
+                {UPGRADE_CATALOG.map((item) => {
+                  const isOwned = purchasedUpgradeIds.includes(item.id);
+                  return (
+                    <ShopItemCard
+                      key={item.id}
+                      icon="flash-outline"
+                      name={item.name}
+                      subtitle={`$${item.cost} · +${item.cashBonus * 100}% workout cash`}
+                      cost={item.cost}
+                      isOwned={isOwned}
+                      canAfford={cash >= item.cost}
+                      onBuy={() => handlePurchaseResult(buyUpgrade(item.id))}
+                    />
+                  );
+                })}
+              </View>
+            )}
+
+            {activeShopTab === "managers" && (
+              <View style={styles.itemList}>
+                {MANAGER_CATALOG.map((item) => {
+                  const isOwned = hiredManagerIds.includes(item.id);
+                  return (
+                    <ShopItemCard
+                      key={item.id}
+                      icon="people-outline"
+                      name={item.name}
+                      subtitle={`$${item.cost} · +$${item.cashPerSecond}/sec`}
+                      cost={item.cost}
+                      isOwned={isOwned}
+                      canAfford={cash >= item.cost}
+                      onBuy={() => handlePurchaseResult(hireManager(item.id))}
+                    />
+                  );
+                })}
+              </View>
+            )}
+
+            {activeShopTab === "zones" && (
+              <View style={styles.itemList}>
+                {ZONE_CATALOG.map((zone) => {
+                  const isOwned = unlockedZones.includes(zone.id);
+                  const isLevelLocked = gymLevel < zone.requiredLevel;
+                  return (
+                    <ShopItemCard
+                      key={zone.id}
+                      icon="business-outline"
+                      name={zone.name}
+                      subtitle={`$${zone.cost}`}
+                      cost={zone.cost}
+                      isOwned={isOwned}
+                      lockedReason={isLevelLocked ? `Requires Gym Lv ${zone.requiredLevel}` : undefined}
+                      canAfford={cash >= zone.cost}
+                      onBuy={() => handlePurchaseResult(buyZone(zone.id))}
+                    />
+                  );
+                })}
+              </View>
+            )}
+
+            {activeShopTab === "staff" && (
+              <View style={styles.itemList}>
+                {STAFF_CATALOG.map((staff) => {
+                  const isOwned = hiredStaffIds.includes(staff.id);
+                  return (
+                    <ShopItemCard
+                      key={staff.id}
+                      icon="ribbon-outline"
+                      name={`${staff.role} — ${staff.name}`}
+                      subtitle={`${staff.operationalZone} · ${staff.description}`}
+                      cost={staff.cost}
+                      isOwned={isOwned}
+                      canAfford={cash >= staff.cost}
+                      onBuy={() => handlePurchaseResult(hireStaff(staff.id))}
+                    />
+                  );
+                })}
+              </View>
+            )}
+          </ScrollView>
+        )}
+
+        {activePage === "leaderboard" && (
+          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            <View style={styles.section}>
+              <Text style={typography.label}>GLOBAL LEADERBOARD 🏆</Text>
+              <View style={styles.leaderboardList}>
+                {leaderboardEntries.map((entry, index) => {
+                  const isPlayer = entry.name === "You";
+                  return (
+                    <View
+                      key={`${entry.name}-${index}`}
+                      style={[styles.leaderboardRow, isPlayer && styles.leaderboardRowPlayer]}
+                    >
+                      <Text style={[styles.leaderboardRank, isPlayer && styles.leaderboardTextPlayer]}>
+                        #{index + 1}
+                      </Text>
+                      <Text
+                        style={[styles.leaderboardName, isPlayer && styles.leaderboardTextPlayer]}
+                        numberOfLines={1}
+                      >
+                        {entry.name}
+                      </Text>
+                      <Text style={[styles.leaderboardStat, isPlayer && styles.leaderboardTextPlayer]}>
+                        {entry.renownPoints} Renown
+                      </Text>
+                      <Text style={[styles.leaderboardStat, isPlayer && styles.leaderboardTextPlayer]}>
+                        Prestige {entry.prestigeCount}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          </ScrollView>
+        )}
+
+        {activePage === "challenges" && (
+          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            <View style={styles.section}>
+              <Text style={typography.label}>ACTIVE CHALLENGES 🎯</Text>
+              <View style={styles.questList}>
+                {QUEST_CATALOG.map((quest) => {
+                  const isComplete = completedQuestIds.includes(quest.id);
+                  const progress = quest.getProgress({
+                    purchasedEquipmentIds,
+                    hiredManagerIds,
+                    cashPerSecond,
+                    finishedWorkoutExerciseNames: [],
+                  });
+
+                  return (
+                    <View
+                      key={quest.id}
+                      style={[styles.questCard, isComplete && styles.questCardComplete]}
+                    >
+                      <View style={styles.questIconBadge}>
+                        <Ionicons
+                          name={isComplete ? "checkmark-circle" : "flag-outline"}
+                          size={20}
+                          color={isComplete ? colors.success : colors.accentRenown}
+                        />
+                      </View>
+
+                      <View style={styles.questInfo}>
+                        <Text style={styles.questTitle}>{quest.title}</Text>
+                        <Text style={styles.questDescription}>{quest.description}</Text>
+                        <Text style={styles.questProgress}>
+                          {isComplete
+                            ? "Reward claimed!"
+                            : `${progress.current}/${progress.target}`}
+                        </Text>
+                      </View>
+
+                      <View style={styles.questReward}>
+                        <Text style={styles.questRewardCash}>${quest.rewardCash}</Text>
+                        <Text style={styles.questRewardRenown}>+{quest.rewardRenown} Renown</Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          </ScrollView>
+        )}
+      </View>
+
+      <GymBottomNav activePage={activePage} onSelectPage={handleSelectPage} />
 
       <PrestigeModal
         visible={isPrestigeModalVisible}
@@ -437,19 +460,6 @@ export default function TycoonScreen() {
       <EmpireSnapshotModal
         visible={isSnapshotModalVisible}
         onClose={() => setSnapshotModalVisible(false)}
-      />
-      <InspectorPanel
-        selection={selection}
-        onClose={() => {
-          setSelection(null);
-          setIsEditingEquipment(false);
-        }}
-        isEditing={isEditingEquipment}
-        onToggleEdit={() => setIsEditingEquipment((prev) => !prev)}
-        onSetColor={setEquipmentColor}
-        onRotate={rotateEquipment}
-        onStartMove={(equipmentId) => setPlacingEquipmentId(equipmentId)}
-        onUpgrade={handleUpgradeEquipment}
       />
     </SafeAreaView>
   );
@@ -460,44 +470,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
+  pageContainer: {
+    flex: 1,
   },
-  backButton: {
-    width: 36,
-    height: 36,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: colors.textPrimary,
-  },
-  headerRightGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  devButton: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.accentRenown,
-  },
-  devButtonText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: colors.accentRenown,
+  gymFloorPage: {
+    flex: 1,
+    position: "relative",
   },
   gymLevelCard: {
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.sm,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
@@ -548,10 +528,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: colors.textTertiary,
     alignSelf: "flex-end",
-  },
-  gymFloorContainer: {
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.sm,
   },
   scrollContent: {
     padding: spacing.lg,
