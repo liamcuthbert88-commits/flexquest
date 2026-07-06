@@ -171,6 +171,32 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [isHydrated, setIsHydrated] = useState(false);
   const saver = useRef(createDebouncedSaver(STORAGE_KEY, SAVE_DEBOUNCE_MS)).current;
 
+  function buildPersistedStats(): PersistedUserStats {
+    return {
+      level,
+      xp,
+      cash,
+      purchasedEquipmentIds,
+      purchasedUpgradeIds,
+      hiredManagerIds,
+      renownPoints,
+      gymLevel,
+      completedQuestIds,
+      prestigeCount,
+      currentLocationId,
+      lifetimeCashEarned,
+      unlockedZones,
+      equipmentLevels,
+      hiredStaffIds,
+      equipmentCustomizations,
+      lastActiveTimestamp,
+      lastWorkoutRewardDate,
+    };
+  }
+
+  const latestStatsRef = useRef<PersistedUserStats>(buildPersistedStats());
+  latestStatsRef.current = buildPersistedStats();
+
   useEffect(() => {
     let cancelled = false;
 
@@ -235,6 +261,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
             setPendingOfflineEarnings(offlineEarnings);
           }
         }
+
+        setLastActiveTimestamp(Date.now());
       }
       setIsHydrated(true);
     });
@@ -246,27 +274,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isHydrated) return;
-    const stats: PersistedUserStats = {
-      level,
-      xp,
-      cash,
-      purchasedEquipmentIds,
-      purchasedUpgradeIds,
-      hiredManagerIds,
-      renownPoints,
-      gymLevel,
-      completedQuestIds,
-      prestigeCount,
-      currentLocationId,
-      lifetimeCashEarned,
-      unlockedZones,
-      equipmentLevels,
-      hiredStaffIds,
-      equipmentCustomizations,
-      lastActiveTimestamp,
-      lastWorkoutRewardDate,
-    };
-    saver.debouncedSave(stats);
+    saver.debouncedSave(buildPersistedStats());
   }, [
     level,
     xp,
@@ -293,8 +301,10 @@ export function UserProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
       if (nextState === "background" || nextState === "inactive") {
+        const now = Date.now();
+        saver.debouncedSave({ ...latestStatsRef.current, lastActiveTimestamp: now });
         saver.flush();
-        setLastActiveTimestamp(Date.now());
+        setLastActiveTimestamp(now);
       }
     });
     return () => subscription.remove();
