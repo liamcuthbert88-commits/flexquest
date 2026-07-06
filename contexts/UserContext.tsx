@@ -22,7 +22,7 @@ import {
   HEAD_TRAINER_EQUIPMENT_BONUS,
   HEAD_TRAINER_WORKOUT_BONUS,
 } from "@/constants/staff";
-import { createDebouncedSaver, loadJSON } from "@/lib/storage";
+import { createDebouncedSaver, loadJSON, removeJSON } from "@/lib/storage";
 import { AppState } from "react-native";
 
 export const XP_PER_LEVEL = 100;
@@ -119,6 +119,8 @@ type UserContextValue = {
   hireStaff: (staffId: string) => PurchaseResult;
   /** Dev-sandbox cheat — no-ops outside dev builds. */
   injectDevRiches: () => void;
+  /** Dev-only full progress wipe — no-ops outside dev builds. */
+  resetProgress: () => void;
   renownPoints: number;
   renownToNextGymLevel: number;
   gymLevel: number;
@@ -373,6 +375,33 @@ export function UserProvider({ children }: { children: ReactNode }) {
     addRenown(DEV_RENOWN_INJECTION);
     setLevel((prev) => Math.max(prev, DEV_LEVEL_FLOOR));
     setGymLevel((prev) => Math.max(prev, DEV_LEVEL_FLOOR));
+  }
+
+  /** Dev-only sandbox reset — wipes the save file and every stat back to a
+   * fresh install's defaults, for retesting progression from level one.
+   * No-ops outside dev builds regardless of caller. */
+  function resetProgress() {
+    if (!__DEV__) return;
+    removeJSON(STORAGE_KEY);
+    setLevel(1);
+    setXp(0);
+    setCash(STARTING_CASH);
+    setPurchasedEquipmentIds([]);
+    setPurchasedUpgradeIds([]);
+    setHiredManagerIds([]);
+    setRenownPoints(0);
+    setGymLevel(1);
+    setCompletedQuestIds([]);
+    setPrestigeCount(0);
+    setCurrentLocationId("garage");
+    setLifetimeCashEarned(0);
+    setUnlockedZones([MAIN_FLOOR_ZONE_ID]);
+    setEquipmentLevels({});
+    setHiredStaffIds([]);
+    setEquipmentCustomizations({});
+    setLastActiveTimestamp(0);
+    setLastWorkoutRewardDate("");
+    setPendingOfflineEarnings(null);
   }
 
   /** Evaluates quests against an explicit context (rather than reading state
@@ -718,6 +747,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       hiredStaffIds,
       hireStaff,
       injectDevRiches,
+      resetProgress,
       equipmentCustomizations,
       setEquipmentColor,
       rotateEquipment,

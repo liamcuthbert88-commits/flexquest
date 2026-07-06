@@ -73,6 +73,7 @@ export default function TycoonScreen() {
     currentLocation,
     addCash,
     injectDevRiches,
+    resetProgress,
     setEquipmentColor,
     rotateEquipment,
     pendingOfflineEarnings,
@@ -142,6 +143,19 @@ export default function TycoonScreen() {
     }
   }
 
+  function handleDevReset() {
+    if (Platform.OS === "web") {
+      if (typeof window !== "undefined" && window.confirm("Reset all progress back to level one?")) {
+        resetProgress();
+      }
+    } else {
+      Alert.alert("Reset Progress?", "This wipes cash, level, equipment, and quests back to a fresh start.", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Reset", style: "destructive", onPress: () => resetProgress() },
+      ]);
+    }
+  }
+
   useEffect(() => {
     if (pendingOfflineEarnings == null) return;
     const message = `+$${pendingOfflineEarnings} earned while you were away.`;
@@ -176,6 +190,7 @@ export default function TycoonScreen() {
         onBack={() => router.back()}
         onSnapshot={() => setSnapshotModalVisible(true)}
         onDevRiches={handleDevRiches}
+        onDevReset={handleDevReset}
       />
 
       <View style={styles.pageContainer}>

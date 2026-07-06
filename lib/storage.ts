@@ -22,6 +22,15 @@ export async function saveJSON(key: string, value: unknown): Promise<void> {
   }
 }
 
+/** Deletes the value at `key`. Failures are swallowed, same as `saveJSON`. */
+export async function removeJSON(key: string): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(key);
+  } catch {
+    // non-fatal
+  }
+}
+
 /** Builds a debounced saver for `key`: rapid calls (e.g. a burst of idle-cash
  * ticks or quick purchases) coalesce into a single write `delayMs` after the
  * last call, instead of hitting disk on every state change. `flush()` writes
