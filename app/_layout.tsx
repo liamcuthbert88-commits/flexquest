@@ -15,6 +15,11 @@ import { UserProvider } from "@/contexts/UserContext";
 // something visibly misbehaved in dev.
 LogBox.ignoreLogs([
   "AsyncStorage has been extracted from react-native core and will be removed in a future release.",
+  // @react-three/fiber 9.6.1 (latest stable — only unstable 10.0.0
+  // alpha/canary builds go further) constructs `new THREE.Clock()` inside
+  // its own createStore internals on every Canvas mount; there's no app
+  // callsite to swap for THREE.Timer, and no stable r3f release yet does.
+  "THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.",
 ]);
 
 export default function RootLayout() {
