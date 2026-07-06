@@ -280,7 +280,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const DEV_RENOWN_INJECTION = 5000;
   /** Highest requiredLevel across EQUIPMENT_CATALOG/LOCATION_CATALOG today —
    * kept as a floor (not an additive amount) so every shop lock reads true. */
-  const DEV_LEVEL_FLOOR = 10;
+  const DEV_LEVEL_FLOOR = 20;
 
   /** Dev-only sandbox cheat for testing late-game pricing/configurations
    * without grinding. Bypasses `creditCash` (this isn't "earned") and reuses
