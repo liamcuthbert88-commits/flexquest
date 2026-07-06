@@ -36,6 +36,7 @@ import {
   getPlayAreaBounds,
   type PlayAreaBounds,
   SMOOTHIE_BAR_POSITION,
+  EXTERIOR_RING_WIDTH,
 } from "@/constants/zones";
 import { SMOOTHIE_BAR_RECHARGE_CASH, CLERK_RECHARGE_MULTIPLIER, JANITOR_SPEED_MULTIPLIER } from "@/constants/staff";
 import { useUser } from "@/contexts/UserContext";
@@ -51,6 +52,7 @@ import {
 } from "@/components/GymNpcs";
 import { GymStaff } from "@/components/GymStaff";
 import { GymDecor } from "@/components/GymDecor";
+import { GymExterior } from "@/components/GymExterior";
 
 type LocationMood = {
   ambientColor: string;
@@ -599,7 +601,11 @@ function CameraRig({
       angleDifference(azimuthTargetRef.current, azimuthRef.current) *
       Math.min(1, delta * AZIMUTH_EASE_RATE);
 
-    const orbitRadius = currentRadiusRef.current + zoomOffsetRef.current;
+    const rawOrbitRadius = currentRadiusRef.current + zoomOffsetRef.current;
+    const bounds = boundsRef.current;
+    const maxOrbitRadius =
+      Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) / 2 + EXTERIOR_RING_WIDTH;
+    const orbitRadius = Math.min(rawOrbitRadius, maxOrbitRadius);
     const targetPolar = getZoomLinkedPolar(orbitRadius);
     polarRef.current += (targetPolar - polarRef.current) * Math.min(1, delta * POLAR_EASE_RATE);
     // Larger polar = lower camera height (∝ cos(polar)) — flooring it here
@@ -1797,6 +1803,7 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
 
         <GymBackdrop prestigeCount={prestigeCount} windowColor={mood.windowColor} />
 
+        <GymExterior bounds={playAreaBounds} />
         <TiledFloor
           key={`${playAreaBounds.minX}-${playAreaBounds.maxX}-${playAreaBounds.minZ}-${playAreaBounds.maxZ}`}
           bounds={playAreaBounds}
