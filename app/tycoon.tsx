@@ -28,7 +28,8 @@ import { colors, radius, spacing, typography } from "@/constants/theme";
 import { EQUIPMENT_CATALOG } from "@/constants/equipment";
 import { UPGRADE_CATALOG } from "@/constants/upgrades";
 import { MANAGER_CATALOG } from "@/constants/managers";
-import { QUEST_CATALOG } from "@/constants/quests";
+import { CHALLENGE_CATALOG, CHALLENGE_TIERS, type ChallengeTier } from "@/constants/challenges";
+import { ChallengeCard } from "@/components/ChallengeCard";
 import { LOCATION_CATALOG } from "@/constants/locations";
 import { ZONE_CATALOG } from "@/constants/zones";
 import { STAFF_CATALOG } from "@/constants/staff";
@@ -44,6 +45,13 @@ const SHOP_TABS: { key: ShopTabKey; label: string }[] = [
   { key: "zones", label: "Facility Expansion Center 🏗️" },
   { key: "staff", label: "Staff Roster 🎖️" },
 ];
+
+const CHALLENGE_TIER_LABELS: Record<ChallengeTier, string> = {
+  easy: "Easy",
+  medium: "Medium",
+  hard: "Hard",
+  elite: "Elite",
+};
 
 const TAP_BONUS_CASH = 5;
 
@@ -67,7 +75,8 @@ export default function TycoonScreen() {
     renownPoints,
     renownToNextGymLevel,
     gymLevel,
-    completedQuestIds,
+    isChallengeCompletedToday,
+    claimChallenge,
     prestigeCount,
     currentLocationId,
     currentLocation,
@@ -78,6 +87,7 @@ export default function TycoonScreen() {
   } = useUser();
   const [activePage, setActivePage] = useState<GymPageKey>("gymFloor");
   const [activeShopTab, setActiveShopTab] = useState<ShopTabKey>("equipment");
+  const [activeChallengeTier, setActiveChallengeTier] = useState<ChallengeTier>("easy");
   const [isPrestigeModalVisible, setPrestigeModalVisible] = useState(false);
   const [isSnapshotModalVisible, setSnapshotModalVisible] = useState(false);
   const [cashPopups, setCashPopups] = useState<CashPopup[]>([]);
@@ -99,18 +109,19 @@ export default function TycoonScreen() {
     .sort((a, b) => b.renownPoints - a.renownPoints || b.prestigeCount - a.prestigeCount);
 
   function handlePurchaseResult(result: PurchaseResult) {
+    // Nothing to report on a plain purchase now that quests are gone.
+    void result;
+  }
+
+  function handleClaimChallenge(challengeId: string) {
+    const result = claimChallenge(challengeId);
     if (!result.success) return;
 
-    const lines: string[] = [];
-    for (const quest of result.newlyCompleted) {
-      lines.push(`🏆 ${quest.title} Complete! +$${quest.rewardCash} · +${quest.rewardRenown} Renown`);
-    }
+    const lines = ["🎉 Challenge complete!"];
     if (result.gymLevelUp) {
       lines.push(`🌟 Gym Level Up! Now Level ${result.gymLevelUp.newGymLevel}`);
     }
-    if (lines.length > 0) {
-      Alert.alert("Nice!", lines.join("\n"));
-    }
+    Alert.alert("Nice!", lines.join("\n"));
   }
 
   function handleCollectTap(event: GestureResponderEvent) {
@@ -404,47 +415,39 @@ export default function TycoonScreen() {
         {activePage === "challenges" && (
           <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
             <View style={styles.section}>
-              <Text style={typography.label}>ACTIVE CHALLENGES 🎯</Text>
-              <View style={styles.questList}>
-                {QUEST_CATALOG.map((quest) => {
-                  const isComplete = completedQuestIds.includes(quest.id);
-                  const progress = quest.getProgress({
-                    purchasedEquipmentIds,
-                    hiredManagerIds,
-                    cashPerSecond,
-                    finishedWorkoutExerciseNames: [],
-                  });
+              <Text style={typography.label}>REAL-LIFE CHALLENGES 💪</Text>
 
+              <View style={styles.tabRow}>
+                {CHALLENGE_TIERS.map((tier) => {
+                  const isActive = tier === activeChallengeTier;
                   return (
-                    <View
-                      key={quest.id}
-                      style={[styles.questCard, isComplete && styles.questCardComplete]}
+                    <Pressable
+                      key={tier}
+                      onPress={() => setActiveChallengeTier(tier)}
+                      style={[styles.tabPill, isActive && styles.tabPillActive]}
                     >
-                      <View style={styles.questIconBadge}>
-                        <Ionicons
-                          name={isComplete ? "checkmark-circle" : "flag-outline"}
-                          size={20}
-                          color={isComplete ? colors.success : colors.accentRenown}
-                        />
-                      </View>
-
-                      <View style={styles.questInfo}>
-                        <Text style={styles.questTitle}>{quest.title}</Text>
-                        <Text style={styles.questDescription}>{quest.description}</Text>
-                        <Text style={styles.questProgress}>
-                          {isComplete
-                            ? "Reward claimed!"
-                            : `${progress.current}/${progress.target}`}
-                        </Text>
-                      </View>
-
-                      <View style={styles.questReward}>
-                        <Text style={styles.questRewardCash}>${quest.rewardCash}</Text>
-                        <Text style={styles.questRewardRenown}>+{quest.rewardRenown} Renown</Text>
-                      </View>
-                    </View>
+                      <Text style={[styles.tabPillText, isActive && styles.tabPillTextActive]}>
+                        {CHALLENGE_TIER_LABELS[tier]}
+                      </Text>
+                    </Pressable>
                   );
                 })}
+              </View>
+
+              <View style={styles.itemList}>
+                {CHALLENGE_CATALOG.filter((challenge) => challenge.tier === activeChallengeTier).map(
+                  (challenge) => (
+                    <ChallengeCard
+                      key={challenge.id}
+                      title={challenge.title}
+                      description={challenge.description}
+                      rewardCash={challenge.rewardCash}
+                      rewardRenown={challenge.rewardRenown}
+                      isCompletedToday={isChallengeCompletedToday(challenge.id)}
+                      onClaim={() => handleClaimChallenge(challenge.id)}
+                    />
+                  )
+                )}
               </View>
             </View>
           </ScrollView>
@@ -535,65 +538,6 @@ const styles = StyleSheet.create({
   },
   section: {
     gap: spacing.md,
-  },
-  questList: {
-    gap: spacing.sm,
-  },
-  questCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    padding: spacing.md,
-  },
-  questCardComplete: {
-    borderColor: colors.success,
-    backgroundColor: "rgba(52, 211, 153, 0.08)",
-  },
-  questIconBadge: {
-    width: 36,
-    height: 36,
-    borderRadius: radius.pill,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.accentRenownMuted,
-  },
-  questInfo: {
-    flex: 1,
-    gap: 2,
-  },
-  questTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: colors.textPrimary,
-  },
-  questDescription: {
-    fontSize: 12,
-    fontWeight: "500",
-    color: colors.textSecondary,
-  },
-  questProgress: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: colors.accentRenown,
-    marginTop: 2,
-  },
-  questReward: {
-    alignItems: "flex-end",
-    gap: 2,
-  },
-  questRewardCash: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: colors.textPrimary,
-  },
-  questRewardRenown: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: colors.accentRenown,
   },
   cashCard: {
     position: "relative",
