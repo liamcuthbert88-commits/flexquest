@@ -18,4 +18,16 @@ export const MANAGER_CATALOG: Manager[] = [
     cost: 1200,
     cashPerSecond: 8,
   },
+  {
+    id: "assistant-manager",
+    name: "Assistant Manager",
+    cost: 5000,
+    cashPerSecond: 25,
+  },
+  {
+    id: "regional-operations-director",
+    name: "Regional Operations Director",
+    cost: 20000,
+    cashPerSecond: 90,
+  },
 ];

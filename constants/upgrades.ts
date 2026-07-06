@@ -19,4 +19,16 @@ export const UPGRADE_CATALOG: Upgrade[] = [
     cost: 800,
     cashBonus: 0.5,
   },
+  {
+    id: "advanced-ventilation-system",
+    name: "Advanced Ventilation System",
+    cost: 2500,
+    cashBonus: 0.8,
+  },
+  {
+    id: "smart-gym-app-integration",
+    name: "Smart Gym App Integration",
+    cost: 8000,
+    cashBonus: 1.5,
+  },
 ];
