@@ -11,7 +11,8 @@ import { EQUIPMENT_CATALOG, type EquipmentCustomization } from "@/constants/equi
 import { isValidCell, getOccupiedCells } from "@/constants/equipmentGrid";
 import { UPGRADE_CATALOG } from "@/constants/upgrades";
 import { MANAGER_CATALOG } from "@/constants/managers";
-import { QUEST_CATALOG, type Quest, type QuestContext } from "@/constants/quests";
+import { CHALLENGE_CATALOG } from "@/constants/challenges";
+import { getLocalDateString } from "@/lib/date";
 import { LOCATION_CATALOG, getLocation, type Location } from "@/constants/locations";
 import { ZONE_CATALOG, MAIN_FLOOR_ZONE_ID, getPlayAreaBounds } from "@/constants/zones";
 import {
@@ -35,13 +36,13 @@ type AddXpResult = {
   newLevel: number;
 };
 
-type QuestCheckResult = {
-  newlyCompleted: Quest[];
-  gymLevelUp?: { newGymLevel: number };
+export type PurchaseResult = {
+  success: boolean;
 };
 
-export type PurchaseResult = QuestCheckResult & {
+export type ChallengeClaimResult = {
   success: boolean;
+  gymLevelUp?: { newGymLevel: number };
 };
 
 type PersistedUserStats = {
@@ -53,7 +54,7 @@ type PersistedUserStats = {
   hiredManagerIds: string[];
   renownPoints: number;
   gymLevel: number;
-  completedQuestIds: string[];
+  completedChallenges: Record<string, string>;
   prestigeCount: number;
   currentLocationId: string;
   lifetimeCashEarned: number;
@@ -75,7 +76,8 @@ function isValidPersistedStats(value: unknown): value is PersistedUserStats {
     Array.isArray(stats.hiredManagerIds) &&
     typeof stats.renownPoints === "number" &&
     typeof stats.gymLevel === "number" &&
-    Array.isArray(stats.completedQuestIds) &&
+    typeof stats.completedChallenges === "object" &&
+    stats.completedChallenges !== null &&
     typeof stats.prestigeCount === "number" &&
     typeof stats.currentLocationId === "string" &&
     typeof stats.lifetimeCashEarned === "number" &&
@@ -117,8 +119,9 @@ type UserContextValue = {
   renownPoints: number;
   renownToNextGymLevel: number;
   gymLevel: number;
-  completedQuestIds: string[];
-  checkQuests: (finishedWorkoutExerciseNames?: string[]) => QuestCheckResult;
+  completedChallenges: Record<string, string>;
+  isChallengeCompletedToday: (challengeId: string) => boolean;
+  claimChallenge: (challengeId: string) => ChallengeClaimResult;
   prestigeCount: number;
   currentLocationId: string;
   currentLocation: Location;
@@ -146,7 +149,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [hiredManagerIds, setHiredManagerIds] = useState<string[]>([]);
   const [renownPoints, setRenownPoints] = useState(0);
   const [gymLevel, setGymLevel] = useState(1);
-  const [completedQuestIds, setCompletedQuestIds] = useState<string[]>([]);
+  const [completedChallenges, setCompletedChallenges] = useState<Record<string, string>>({});
   const [prestigeCount, setPrestigeCount] = useState(0);
   const [currentLocationId, setCurrentLocationId] = useState("garage");
   const [lifetimeCashEarned, setLifetimeCashEarned] = useState(0);
@@ -173,7 +176,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
         setHiredManagerIds(stored.hiredManagerIds);
         setRenownPoints(stored.renownPoints);
         setGymLevel(stored.gymLevel);
-        setCompletedQuestIds(stored.completedQuestIds);
+        setCompletedChallenges(stored.completedChallenges);
         setPrestigeCount(stored.prestigeCount);
         setCurrentLocationId(stored.currentLocationId);
         setLifetimeCashEarned(stored.lifetimeCashEarned);
@@ -201,7 +204,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       hiredManagerIds,
       renownPoints,
       gymLevel,
-      completedQuestIds,
+      completedChallenges,
       prestigeCount,
       currentLocationId,
       lifetimeCashEarned,
@@ -220,7 +223,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     hiredManagerIds,
     renownPoints,
     gymLevel,
-    completedQuestIds,
+    completedChallenges,
     prestigeCount,
     currentLocationId,
     lifetimeCashEarned,
@@ -297,39 +300,27 @@ export function UserProvider({ children }: { children: ReactNode }) {
     setGymLevel((prev) => Math.max(prev, DEV_LEVEL_FLOOR));
   }
 
-  /** Evaluates quests against an explicit context (rather than reading state
-   * directly) so callers that just changed state this tick — e.g. a purchase
-   * that hasn't re-rendered yet — can pass the *post-change* values instead
-   * of a stale snapshot. */
-  function evaluateQuests(ctx: QuestContext): QuestCheckResult {
-    const newlyCompleted = QUEST_CATALOG.filter(
-      (quest) => !completedQuestIds.includes(quest.id) && quest.isComplete(ctx)
-    );
-
-    if (newlyCompleted.length === 0) {
-      return { newlyCompleted: [] };
-    }
-
-    const totalCash = newlyCompleted.reduce((sum, quest) => sum + quest.rewardCash, 0);
-    const totalRenown = newlyCompleted.reduce((sum, quest) => sum + quest.rewardRenown, 0);
-
-    creditCash(totalCash);
-    setCompletedQuestIds((prev) => [...prev, ...newlyCompleted.map((quest) => quest.id)]);
-    const renownResult = addRenown(totalRenown);
-
-    return {
-      newlyCompleted,
-      gymLevelUp: renownResult.leveledUp ? { newGymLevel: renownResult.newGymLevel } : undefined,
-    };
+  function isChallengeCompletedToday(challengeId: string): boolean {
+    return completedChallenges[challengeId] === getLocalDateString();
   }
 
-  function checkQuests(finishedWorkoutExerciseNames: string[] = []): QuestCheckResult {
-    return evaluateQuests({
-      purchasedEquipmentIds,
-      hiredManagerIds,
-      cashPerSecond,
-      finishedWorkoutExerciseNames,
-    });
+  /** Self-ticked reward for a real-life fitness challenge. No-ops (returns
+   * failure) if the challenge id is unknown or already claimed today — the
+   * Challenges page UI never lets the player tap an already-completed card,
+   * so the failure path only guards against stale/duplicate taps. */
+  function claimChallenge(challengeId: string): ChallengeClaimResult {
+    const challenge = CHALLENGE_CATALOG.find((entry) => entry.id === challengeId);
+    if (!challenge) return { success: false };
+    if (isChallengeCompletedToday(challengeId)) return { success: false };
+
+    creditCash(challenge.rewardCash);
+    setCompletedChallenges((prev) => ({ ...prev, [challengeId]: getLocalDateString() }));
+    const renownResult = addRenown(challenge.rewardRenown);
+
+    return {
+      success: true,
+      gymLevelUp: renownResult.leveledUp ? { newGymLevel: renownResult.newGymLevel } : undefined,
+    };
   }
 
   const currentLocation = useMemo(() => getLocation(currentLocationId), [currentLocationId]);
@@ -387,48 +378,31 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   function buyEquipment(equipmentId: string): PurchaseResult {
     const item = EQUIPMENT_CATALOG.find((entry) => entry.id === equipmentId);
-    if (!item) return { success: false, newlyCompleted: [] };
-    if (purchasedEquipmentIds.includes(equipmentId)) return { success: false, newlyCompleted: [] };
-    if (level < item.requiredLevel) return { success: false, newlyCompleted: [] };
-    if (cash < item.cost) return { success: false, newlyCompleted: [] };
+    if (!item) return { success: false };
+    if (purchasedEquipmentIds.includes(equipmentId)) return { success: false };
+    if (level < item.requiredLevel) return { success: false };
+    if (cash < item.cost) return { success: false };
 
     setCash((prev) => prev - item.cost);
-    const nextEquipmentIds = [...purchasedEquipmentIds, equipmentId];
-    setPurchasedEquipmentIds(nextEquipmentIds);
+    setPurchasedEquipmentIds([...purchasedEquipmentIds, equipmentId]);
     setEquipmentLevels((prev) => ({ ...prev, [equipmentId]: 1 }));
 
-    const nextRawCashPerSecond = rawCashPerSecond + item.cashPerSecond;
-    const questResult = evaluateQuests({
-      purchasedEquipmentIds: nextEquipmentIds,
-      hiredManagerIds,
-      cashPerSecond: nextRawCashPerSecond * globalMultiplier,
-      finishedWorkoutExerciseNames: [],
-    });
-
-    return { success: true, ...questResult };
+    return { success: true };
   }
 
   function upgradeEquipment(equipmentId: string): PurchaseResult {
     const item = EQUIPMENT_CATALOG.find((entry) => entry.id === equipmentId);
-    if (!item) return { success: false, newlyCompleted: [] };
-    if (!purchasedEquipmentIds.includes(equipmentId)) return { success: false, newlyCompleted: [] };
+    if (!item) return { success: false };
+    if (!purchasedEquipmentIds.includes(equipmentId)) return { success: false };
 
     const currentLevel = equipmentLevels[equipmentId] ?? 1;
     const cost = Math.round(item.cost * Math.pow(1.5, currentLevel));
-    if (cash < cost) return { success: false, newlyCompleted: [] };
+    if (cash < cost) return { success: false };
 
     setCash((prev) => prev - cost);
     setEquipmentLevels((prev) => ({ ...prev, [equipmentId]: currentLevel + 1 }));
 
-    const nextRawCashPerSecond = rawCashPerSecond + item.cashPerSecond;
-    const questResult = evaluateQuests({
-      purchasedEquipmentIds,
-      hiredManagerIds,
-      cashPerSecond: nextRawCashPerSecond * globalMultiplier,
-      finishedWorkoutExerciseNames: [],
-    });
-
-    return { success: true, ...questResult };
+    return { success: true };
   }
 
   function setEquipmentColor(equipmentId: string, color: string): void {
@@ -503,61 +477,38 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   function buyUpgrade(upgradeId: string): PurchaseResult {
     const upgrade = UPGRADE_CATALOG.find((entry) => entry.id === upgradeId);
-    if (!upgrade) return { success: false, newlyCompleted: [] };
-    if (purchasedUpgradeIds.includes(upgradeId)) return { success: false, newlyCompleted: [] };
-    if (cash < upgrade.cost) return { success: false, newlyCompleted: [] };
+    if (!upgrade) return { success: false };
+    if (purchasedUpgradeIds.includes(upgradeId)) return { success: false };
+    if (cash < upgrade.cost) return { success: false };
 
     setCash((prev) => prev - upgrade.cost);
     setPurchasedUpgradeIds((prev) => [...prev, upgradeId]);
 
-    const questResult = evaluateQuests({
-      purchasedEquipmentIds,
-      hiredManagerIds,
-      cashPerSecond,
-      finishedWorkoutExerciseNames: [],
-    });
-
-    return { success: true, ...questResult };
+    return { success: true };
   }
 
   function hireManager(managerId: string): PurchaseResult {
     const manager = MANAGER_CATALOG.find((entry) => entry.id === managerId);
-    if (!manager) return { success: false, newlyCompleted: [] };
-    if (hiredManagerIds.includes(managerId)) return { success: false, newlyCompleted: [] };
-    if (cash < manager.cost) return { success: false, newlyCompleted: [] };
+    if (!manager) return { success: false };
+    if (hiredManagerIds.includes(managerId)) return { success: false };
+    if (cash < manager.cost) return { success: false };
 
     setCash((prev) => prev - manager.cost);
-    const nextManagerIds = [...hiredManagerIds, managerId];
-    setHiredManagerIds(nextManagerIds);
+    setHiredManagerIds([...hiredManagerIds, managerId]);
 
-    const nextRawCashPerSecond = rawCashPerSecond + manager.cashPerSecond;
-    const questResult = evaluateQuests({
-      purchasedEquipmentIds,
-      hiredManagerIds: nextManagerIds,
-      cashPerSecond: nextRawCashPerSecond * globalMultiplier,
-      finishedWorkoutExerciseNames: [],
-    });
-
-    return { success: true, ...questResult };
+    return { success: true };
   }
 
   function hireStaff(staffId: string): PurchaseResult {
     const staff = STAFF_CATALOG.find((entry) => entry.id === staffId);
-    if (!staff) return { success: false, newlyCompleted: [] };
-    if (hiredStaffIds.includes(staffId)) return { success: false, newlyCompleted: [] };
-    if (cash < staff.cost) return { success: false, newlyCompleted: [] };
+    if (!staff) return { success: false };
+    if (hiredStaffIds.includes(staffId)) return { success: false };
+    if (cash < staff.cost) return { success: false };
 
     setCash((prev) => prev - staff.cost);
     setHiredStaffIds((prev) => [...prev, staffId]);
 
-    const questResult = evaluateQuests({
-      purchasedEquipmentIds,
-      hiredManagerIds,
-      cashPerSecond,
-      finishedWorkoutExerciseNames: [],
-    });
-
-    return { success: true, ...questResult };
+    return { success: true };
   }
 
   function prestigeReset(targetLocationId: string): boolean {
@@ -580,22 +531,15 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   function buyZone(zoneId: string): PurchaseResult {
     const zone = ZONE_CATALOG.find((entry) => entry.id === zoneId);
-    if (!zone) return { success: false, newlyCompleted: [] };
-    if (unlockedZones.includes(zoneId)) return { success: false, newlyCompleted: [] };
-    if (gymLevel < zone.requiredLevel) return { success: false, newlyCompleted: [] };
-    if (cash < zone.cost) return { success: false, newlyCompleted: [] };
+    if (!zone) return { success: false };
+    if (unlockedZones.includes(zoneId)) return { success: false };
+    if (gymLevel < zone.requiredLevel) return { success: false };
+    if (cash < zone.cost) return { success: false };
 
     setCash((prev) => prev - zone.cost);
     setUnlockedZones((prev) => [...prev, zoneId]);
 
-    const questResult = evaluateQuests({
-      purchasedEquipmentIds,
-      hiredManagerIds,
-      cashPerSecond,
-      finishedWorkoutExerciseNames: [],
-    });
-
-    return { success: true, ...questResult };
+    return { success: true };
   }
 
   const value = useMemo(
@@ -619,8 +563,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
       renownPoints,
       renownToNextGymLevel: RENOWN_PER_GYM_LEVEL,
       gymLevel,
-      completedQuestIds,
-      checkQuests,
+      completedChallenges,
+      isChallengeCompletedToday,
+      claimChallenge,
       prestigeCount,
       currentLocationId,
       currentLocation,
@@ -649,7 +594,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       cashRewardMultiplier,
       renownPoints,
       gymLevel,
-      completedQuestIds,
+      completedChallenges,
       prestigeCount,
       currentLocationId,
       currentLocation,
