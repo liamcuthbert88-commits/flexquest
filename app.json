@@ -32,6 +32,13 @@
       "expo-font",
       "expo-asset",
       "expo-status-bar"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "375f9ec2-ccff-4462-9b0e-fb3a31b7c29c"
+      }
+    },
+    "owner": "captaincuthbert"
   }
 }
