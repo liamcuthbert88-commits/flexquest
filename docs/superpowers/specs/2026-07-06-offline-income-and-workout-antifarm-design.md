@@ -61,19 +61,26 @@ Callers (`UserContext.tsx`, `RoutineContext.tsx`) destructure `{ debouncedSave, 
 
 ### `contexts/UserContext.tsx` — `AppState` listener
 
-One listener serves both offline-income staging and save-flush:
+**Correction (post-implementation, from final whole-branch review):** the ordering below was wrong in the original design — `flush()` persists whatever the saver's `pendingValue` already is, so calling it *before* the timestamp state update propagates just re-saves the *old* timestamp; the fresh one would only reach disk if the debounce timer happened to fire during the OS's post-background window, which is exactly what `flush()` was meant to make unnecessary. The shipped fix instead builds the fresh stats object (with the new timestamp already baked in) and hands it to `debouncedSave` immediately before calling `flush()`, so the synchronous write actually contains the fresh value:
 
 ```ts
+const latestStatsRef = useRef<PersistedUserStats>(buildPersistedStats());
+latestStatsRef.current = buildPersistedStats(); // refreshed every render
+
 useEffect(() => {
   const sub = AppState.addEventListener("change", (nextState) => {
     if (nextState === "background" || nextState === "inactive") {
-      debouncedSave.flush();
-      setLastActiveTimestamp(Date.now());
+      const now = Date.now();
+      saver.debouncedSave({ ...latestStatsRef.current, lastActiveTimestamp: now });
+      saver.flush();
+      setLastActiveTimestamp(now);
     }
   });
   return () => sub.remove();
-}, [debouncedSave]);
+}, [saver]);
 ```
+
+`buildPersistedStats()` is a small helper (shared with the persist effect) that returns the current `PersistedUserStats` shape from render state — see `contexts/UserContext.tsx` for the exact field list. Using a ref instead of listing every piece of state in the effect's dependency array avoids re-subscribing the listener on every ~1s cash tick.
 
 On hydration (inside the existing `loadJSON(...).then(...)` block, after all fields are set from `stored`):
 
