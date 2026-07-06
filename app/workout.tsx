@@ -68,7 +68,7 @@ function getFocusLabel(dayRoutine: DayRoutine): string {
 export default function WorkoutScreen() {
   const router = useRouter();
   const { routine } = useRoutine();
-  const { addXp, addCash, cashRewardMultiplier, globalMultiplier, checkQuests } = useUser();
+  const { addXp, addCash, cashRewardMultiplier, globalMultiplier } = useUser();
   const todayRoutine = routine[getTodayKey()];
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [exercises, setExercises] = useState<ExerciseBlock[]>(() =>
@@ -135,9 +135,6 @@ export default function WorkoutScreen() {
     const { leveledUp, newLevel } = addXp(xpAward);
     addCash(finalCashAward);
 
-    const exerciseNames = exercises.map((exercise) => exercise.name);
-    const { newlyCompleted, gymLevelUp } = checkQuests(exerciseNames);
-
     const title = leveledUp ? "Level Up! 🎉" : "Workout Complete! 💪";
     const lines = [
       leveledUp ? `You reached Level ${newLevel}!` : `+${WORKOUT_XP_REWARD} XP`,
@@ -151,12 +148,6 @@ export default function WorkoutScreen() {
     }
     if (globalMultiplier > 1) {
       lines.push("🏙️ Prestige/location bonus applied");
-    }
-    for (const quest of newlyCompleted) {
-      lines.push(`🏆 Quest Complete: ${quest.title}! +$${quest.rewardCash} · +${quest.rewardRenown} Renown`);
-    }
-    if (gymLevelUp) {
-      lines.push(`🌟 Gym Level Up! Now Level ${gymLevelUp.newGymLevel}`);
     }
 
     if (Platform.OS === "web") {
