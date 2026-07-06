@@ -595,18 +595,20 @@ export function GymDecor({ bounds, unlockedZones }: GymDecorProps) {
       <PosterPanel position={[rightWallX, POSTER_ELEVATION, rightWallZs[1]]} facingAxis="x" accentColor="#F97316" />
       <TvScreen position={[rightWallX, TV_ELEVATION, rightWallZs[2]]} facingAxis="x" />
 
-      <ReceptionDesk position={[0, 0, entranceZ]} />
-      <CheckInTerminal position={[1.5, 0, entranceZ - 0.3]} />
+      {/* Flanking the door against the solid wall segment, not blocking the
+       * doorway itself — see docs/superpowers/specs/2026-07-06-entrance-door-
+       * and-npc-lifecycle-design.md. */}
+      <ReceptionDesk position={[-3.2, 0, entranceZ]} />
+      <CheckInTerminal position={[-1.7, 0, entranceZ - 0.3]} />
       <PottedPlant position={[-1.9, 0, entranceZ]} />
       <PottedPlant position={[1.9, 0, entranceZ]} />
       <BrandEmblem position={[-4, 2.5, entranceWallInsetZ]} />
 
-      {/* New this pass: benches, wall clock, speakers, fire safety, cleaning
+      {/* New this pass: bench, wall clock, speakers, fire safety, cleaning
        * station — placed in the open floor/wall space nothing above already
-       * occupies (near the locker room, the entrance waiting area, the
-       * bare back-wall center, high on the side walls, and the open floor
-       * just outside the equipment cluster). */}
-      <GymBench position={[7.6, 0, -5]} />
+       * occupies (the entrance waiting area, the bare back-wall center, high
+       * on the side walls, and the open floor just outside the equipment
+       * cluster). */}
       <GymBench position={[3.2, 0, entranceZ]} rotationY={Math.PI / 2} />
 
       <WallClock position={[0, 2.6, bounds.minZ + WALL_MOUNT_INSET]} facingAxis="z" />

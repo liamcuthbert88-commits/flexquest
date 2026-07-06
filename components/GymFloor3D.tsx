@@ -36,7 +36,6 @@ import {
   getPlayAreaBounds,
   type PlayAreaBounds,
   SMOOTHIE_BAR_POSITION,
-  LOCKER_POSITION,
 } from "@/constants/zones";
 import { SMOOTHIE_BAR_RECHARGE_CASH, CLERK_RECHARGE_MULTIPLIER, JANITOR_SPEED_MULTIPLIER } from "@/constants/staff";
 import { useUser } from "@/contexts/UserContext";
@@ -1074,6 +1073,51 @@ function WindowedWallSegment({
   );
 }
 
+const DOOR_GLASS_WIDTH = 1.8;
+/** Fills the remainder of ENTRANCE_GAP_WIDTH (4) once both glass panels are
+ * placed — with DOOR_GLASS_WIDTH=1.8 each, that's exactly 0.4, a believable
+ * center mullion width rather than an arbitrary leftover gap. */
+const DOOR_MULLION_WIDTH = ENTRANCE_GAP_WIDTH - DOOR_GLASS_WIDTH * 2;
+
+/** A static glass double-door filling the front wall's entrance gap —
+ * reuses the same glass/frame materials as WindowedWallSegment so it reads
+ * as part of the same building rather than a new material language. No
+ * open/close animation; NPCs simply path straight through it (see
+ * docs/superpowers/specs/2026-07-06-entrance-door-and-npc-lifecycle-design.md).
+ * Spans the full WALL_HEIGHT (floor to the top of the wall), unlike the
+ * windows which sit above a sill — this is a walk-through opening, not a
+ * viewing pane. */
+function EntranceDoor({ z }: { z: number }) {
+  const panelOffsetX = (DOOR_GLASS_WIDTH + DOOR_MULLION_WIDTH) / 2;
+
+  return (
+    <group>
+      {[-panelOffsetX, panelOffsetX].map((x) => (
+        <group key={x} position={[x, WALL_HEIGHT / 2, z]}>
+          <mesh castShadow>
+            <boxGeometry args={[DOOR_GLASS_WIDTH + 0.1, WALL_HEIGHT + 0.1, 0.05]} />
+            <meshStandardMaterial color={WINDOW_FRAME_COLOR} roughness={0.5} metalness={0.2} />
+          </mesh>
+          <mesh position={[0, 0, 0.03]}>
+            <boxGeometry args={[DOOR_GLASS_WIDTH, WALL_HEIGHT, 0.02]} />
+            <meshStandardMaterial
+              color={WINDOW_GLASS_COLOR}
+              roughness={0.05}
+              metalness={0.3}
+              transparent
+              opacity={0.35}
+            />
+          </mesh>
+        </group>
+      ))}
+      <mesh position={[0, WALL_HEIGHT / 2, z]} castShadow>
+        <boxGeometry args={[DOOR_MULLION_WIDTH, WALL_HEIGHT, WALL_THICKNESS]} />
+        <meshStandardMaterial color={WINDOW_FRAME_COLOR} roughness={0.5} metalness={0.2} />
+      </mesh>
+    </group>
+  );
+}
+
 /** The enclosing shell itself — walls sized to `bounds` (see
  * getPlayAreaBounds), corner + mid-span pillars for structural mass, a
  * painted accent stripe doubling as branding, and a gap in the front wall
@@ -1174,6 +1218,7 @@ function GymWalls({ bounds }: { bounds: PlayAreaBounds }) {
         z={maxZ}
         wallMaterial={wallMaterial}
       />
+      <EntranceDoor z={maxZ} />
       <WallPanel
         position={[minX, wallY, centerZ]}
         size={[WALL_THICKNESS, WALL_HEIGHT, depth + WALL_THICKNESS]}
@@ -1216,26 +1261,6 @@ function SmoothieBar() {
           <meshStandardMaterial color="#2a2c33" roughness={0.5} metalness={0.3} />
         </mesh>
       ))}
-    </group>
-  );
-}
-
-/** Locker Room Door Block — a fixed environmental landmark, not purchasable. */
-function LockerRoomDoor() {
-  return (
-    <group position={LOCKER_POSITION}>
-      <mesh position={[0, 1.0, 0]} castShadow receiveShadow>
-        <boxGeometry args={[1.1, 2.0, 0.15]} />
-        <meshStandardMaterial color="#2f323b" roughness={0.5} metalness={0.2} />
-      </mesh>
-      <mesh position={[0, 1.0, 0.08]} castShadow>
-        <boxGeometry args={[0.85, 1.7, 0.03]} />
-        <meshStandardMaterial color="#3a3d47" roughness={0.4} metalness={0.25} />
-      </mesh>
-      <mesh position={[0.32, 1.0, 0.12]} castShadow>
-        <sphereGeometry args={[0.04, 12, 12]} />
-        <meshStandardMaterial color="#c7cad1" metalness={0.8} roughness={0.2} />
-      </mesh>
     </group>
   );
 }
@@ -1774,7 +1799,6 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
         <CeilingVents />
         <NeonPerimeter bounds={playAreaBounds} />
         <SmoothieBar />
-        <LockerRoomDoor />
 
         {ownedEquipment.map((item) => {
           const position = getEquipmentWorldPosition(item, equipmentCustomizations);
