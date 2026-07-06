@@ -1,3 +1,5 @@
+import { EQUIPMENT_GRID_TILE_SIZE } from "./equipment";
+
 export type Zone = {
   id: string;
   name: string;
@@ -44,41 +46,32 @@ export const ZONE_LANDMARKS: Record<string, [number, number, number]> = {
 
 export type PlayAreaBounds = { minX: number; maxX: number; minZ: number; maxZ: number };
 
-/** Half the Main Floor's 20x20 footprint (see GymFloor3D.tsx's FLOOR_SIZE) —
- * kept as a literal here rather than importing FLOOR_SIZE, since that
- * constant is about floor-tiling specifics, a different concern from the
- * play area's overall bounds. */
-const MAIN_FLOOR_HALF_SIZE = 10;
+/** Base half-size in tiles (not units) — 4 tiles each way from center is an
+ * 8x8 tile (20x20 unit) starting floor. Kept in tiles, not units, since
+ * every term in the formula below is naturally tile-denominated. */
+const BASE_HALF_TILES = 4;
+/** +1 tile each side of X per zone owned (2 columns total) — see the
+ * 2026-07-06 play-area-resize design doc for the full rationale. */
+const COLUMNS_PER_ZONE = 1;
+/** +2 tiles on -Z per zone owned (2 rows total) — all on one side since
+ * +Z (maxZ) is permanently fixed at the entrance wall and can never grow. */
+const ROWS_PER_ZONE = 2;
 
 /** The enclosing shell has to grow with the facility instead of staying
- * fixed at the 20x20 main floor — Cardio Deck ([15,0,0], 10x20) and Iron
- * Vault ([-15,0,-10], 10x10) both extend well past that boundary once
- * unlocked, and a fixed-size box would either occlude them behind a wall or
- * need to ignore them. */
+ * fixed at the 8x8-tile starting floor. Purely a function of *how many*
+ * zones are owned, not which specific ones — every zone purchase adds the
+ * same +2 columns (X, split 1 tile to each side) and +2 rows (Z, all on the
+ * -Z side, since +Z/maxZ is fixed at the entrance wall and can never grow).
+ * This means a future 5th zone tier needs zero changes here. */
 export function getPlayAreaBounds(unlockedZones: string[]): PlayAreaBounds {
-  let minX = -MAIN_FLOOR_HALF_SIZE;
-  let maxX = MAIN_FLOOR_HALF_SIZE;
-  let minZ = -MAIN_FLOOR_HALF_SIZE;
-  let maxZ = MAIN_FLOOR_HALF_SIZE;
+  const zonesOwned = unlockedZones.filter((id) => id !== MAIN_FLOOR_ZONE_ID).length;
 
-  if (unlockedZones.includes("cardio_deck")) {
-    maxX = 20;
-  }
-  if (unlockedZones.includes("iron_vault")) {
-    minX = Math.min(minX, -20);
-    minZ = Math.min(minZ, -15);
-  }
-  // Both new tiers extend the same 3 directions the floor already grows in
-  // (cardio_deck -> maxX, iron_vault -> minX/minZ) further, rather than
-  // opening a 4th — maxZ is permanently fixed at MAIN_FLOOR_HALF_SIZE since
-  // that's where the entrance door sits (see the entrance-door spec).
-  if (unlockedZones.includes("facility_expansion_3")) {
-    maxX = Math.max(maxX, 32);
-  }
-  if (unlockedZones.includes("facility_expansion_4")) {
-    minX = Math.min(minX, -32);
-    minZ = Math.min(minZ, -25);
-  }
+  const halfWidthTiles = BASE_HALF_TILES + zonesOwned * COLUMNS_PER_ZONE;
+  const minX = -halfWidthTiles * EQUIPMENT_GRID_TILE_SIZE;
+  const maxX = halfWidthTiles * EQUIPMENT_GRID_TILE_SIZE;
+
+  const minZ = -(BASE_HALF_TILES + zonesOwned * ROWS_PER_ZONE) * EQUIPMENT_GRID_TILE_SIZE;
+  const maxZ = BASE_HALF_TILES * EQUIPMENT_GRID_TILE_SIZE;
 
   return { minX, maxX, minZ, maxZ };
 }
