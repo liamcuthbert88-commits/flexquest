@@ -759,10 +759,22 @@ function GlowLayer({
  * but these fixture meshes previously stayed fixed to the original
  * footprint, so the ceiling visually looked unlit over any newly-unlocked
  * zone even though the floor beneath it wasn't actually darker. */
+/** Hard ceiling on row count, independent of how wide the floor grows —
+ * each row costs one emissive fixture mesh plus one GlowLayer (a large,
+ * additively-blended transparent quad; among the most fill-rate-expensive
+ * things a mobile GPU renders). Uncapped, buying all 4 zones grows this from
+ * 4 rows to 11, nearly tripling that overdraw. Past this cap, rows just
+ * spread further apart on a wider floor instead of multiplying — GPU cost
+ * stays constant regardless of how much of the facility is unlocked. */
+const MAX_LED_ROWS = 6;
+
 function OverheadLedArray({ bounds }: { bounds: PlayAreaBounds }) {
   const rowSpacing = 6;
   const rowMargin = 2;
-  const rowCount = Math.max(3, Math.round((bounds.maxX - bounds.minX - rowMargin * 2) / rowSpacing) + 1);
+  const rowCount = Math.min(
+    MAX_LED_ROWS,
+    Math.max(3, Math.round((bounds.maxX - bounds.minX - rowMargin * 2) / rowSpacing) + 1)
+  );
   const rows: number[] = Array.from({ length: rowCount }, (_, i) =>
     rowCount === 1
       ? (bounds.minX + bounds.maxX) / 2
