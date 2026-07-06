@@ -9,7 +9,16 @@ import {
 } from "react";
 import { PanResponder, Platform, StyleSheet, Text, View } from "react-native";
 import { Canvas, useFrame } from "@react-three/fiber/native";
-import { AdditiveBlending, Color, Group, InstancedMesh, Object3D, PerspectiveCamera, Vector3 } from "three";
+import {
+  AdditiveBlending,
+  Color,
+  Group,
+  InstancedMesh,
+  MeshStandardMaterial,
+  Object3D,
+  PerspectiveCamera,
+  Vector3,
+} from "three";
 
 import { colors, radius } from "@/constants/theme";
 import {
@@ -123,6 +132,21 @@ const MAX_ZOOM_OFFSET = 6;
  * array's height, not the beams', since the LED array is the denser/more
  * visually dominant of the two. */
 const MAX_CAMERA_HEIGHT = 5.5;
+
+/** Distance (world units) from a wall plane within which it starts fading —
+ * lets the camera get close to inspect equipment near a wall without that
+ * wall blocking the view, while staying fully opaque (and visible as an
+ * actual boundary) everywhere else. Only the wall(s) the camera is
+ * currently near fade; the rest of the shell stays solid. */
+const WALL_FADE_DISTANCE = 3;
+/** Floor on faded opacity — kept above 0 so a near wall still reads as
+ * "see-through" (translucent boundary) rather than vanishing outright. */
+const MIN_WALL_OPACITY = 0.12;
+/** How far past a wall's own span (along the wall) the camera can still be
+ * and count as "near" it — covers the corner case, where the camera is close
+ * to a wall just past where the perpendicular wall begins. */
+const WALL_FADE_LATERAL_MARGIN = 1.5;
+const WALL_FADE_EASE_RATE = 6;
 const PINCH_ZOOM_SPEED = 0.02;
 /** 1:1 — twisting two fingers 90° rotates the camera 90°, the natural direct-
  * manipulation feel for a twist gesture (matching e.g. iOS's photo pinch-
@@ -913,6 +937,8 @@ function WallPanel({
   position,
   size,
   accentOffset,
+  wallMaterial,
+  accentMaterial,
 }: {
   position: [number, number, number];
   size: [number, number, number];
@@ -920,6 +946,11 @@ function WallPanel({
    * accent stripe overlaid on this panel — different per wall since each
    * faces a different direction. */
   accentOffset: [number, number, number];
+  /** Shared, not per-panel — GymWalls fades every panel's opacity in lockstep
+   * off one useFrame by mutating these materials directly, so all panels
+   * must point at the same instances rather than each owning their own. */
+  wallMaterial: MeshStandardMaterial;
+  accentMaterial: MeshStandardMaterial;
 }) {
   const accentPosition: [number, number, number] = [
     position[0] + accentOffset[0],
@@ -931,18 +962,16 @@ function WallPanel({
 
   return (
     <>
-      <mesh position={position} castShadow receiveShadow>
+      <mesh position={position} castShadow receiveShadow material={wallMaterial}>
         <boxGeometry args={size} />
-        <meshStandardMaterial color={WALL_COLOR} roughness={0.85} metalness={0.05} />
       </mesh>
       {/* Painted brand accent stripe — reuses the same signature violet as
        * the neon floor trim so the branding reads as one consistent
        * identity, rather than introducing a second competing color. Plain
        * matte paint, not emissive: this pass is about environment detail,
        * not new rendering techniques, so it doesn't need its own GlowLayer. */}
-      <mesh position={accentPosition}>
+      <mesh position={accentPosition} material={accentMaterial}>
         <boxGeometry args={accentSize} />
-        <meshStandardMaterial color={NEON_COLOR} roughness={0.6} metalness={0.1} />
       </mesh>
     </>
   );
@@ -969,10 +998,15 @@ function WindowedWallSegment({
   centerX,
   width,
   z,
+  wallMaterial,
 }: {
   centerX: number;
   width: number;
   z: number;
+  /** Same shared, GymWalls-owned material as the other panels — the solid
+   * infill here fades in lockstep with the rest of the shell. The window
+   * frame/glass stay as they are; they're not what blocks the view. */
+  wallMaterial: MeshStandardMaterial;
 }) {
   const usableWidth = width - WINDOW_MARGIN * 2;
   const spacing = usableWidth / WINDOW_COUNT;
@@ -993,13 +1027,16 @@ function WindowedWallSegment({
 
   return (
     <group>
-      <mesh position={[centerX, WINDOW_SILL_HEIGHT / 2, z]} castShadow receiveShadow>
+      <mesh position={[centerX, WINDOW_SILL_HEIGHT / 2, z]} castShadow receiveShadow material={wallMaterial}>
         <boxGeometry args={[width, WINDOW_SILL_HEIGHT, WALL_THICKNESS]} />
-        <meshStandardMaterial color={WALL_COLOR} roughness={0.85} metalness={0.05} />
       </mesh>
-      <mesh position={[centerX, (WINDOW_TOP_HEIGHT + WALL_HEIGHT) / 2, z]} castShadow receiveShadow>
+      <mesh
+        position={[centerX, (WINDOW_TOP_HEIGHT + WALL_HEIGHT) / 2, z]}
+        castShadow
+        receiveShadow
+        material={wallMaterial}
+      >
         <boxGeometry args={[width, WALL_HEIGHT - WINDOW_TOP_HEIGHT, WALL_THICKNESS]} />
-        <meshStandardMaterial color={WALL_COLOR} roughness={0.85} metalness={0.05} />
       </mesh>
 
       {solidPieces.map((piece, i) => (
@@ -1008,9 +1045,9 @@ function WindowedWallSegment({
           position={[(piece.start + piece.end) / 2, (WINDOW_SILL_HEIGHT + WINDOW_TOP_HEIGHT) / 2, z]}
           castShadow
           receiveShadow
+          material={wallMaterial}
         >
           <boxGeometry args={[piece.end - piece.start, WINDOW_TOP_HEIGHT - WINDOW_SILL_HEIGHT, WALL_THICKNESS]} />
-          <meshStandardMaterial color={WALL_COLOR} roughness={0.85} metalness={0.05} />
         </mesh>
       ))}
 
@@ -1074,34 +1111,88 @@ function GymWalls({ bounds }: { bounds: PlayAreaBounds }) {
     [maxX, centerZ],
   ];
 
+  // Shared across every panel/pillar below, not one material per mesh — lets
+  // a single useFrame fade the whole shell in lockstep by mutating .opacity
+  // on just these three instances instead of re-rendering N meshes.
+  const wallMaterial = useMemo(
+    () => new MeshStandardMaterial({ color: WALL_COLOR, roughness: 0.85, metalness: 0.05, transparent: true }),
+    []
+  );
+  const accentMaterial = useMemo(
+    () => new MeshStandardMaterial({ color: NEON_COLOR, roughness: 0.6, metalness: 0.1, transparent: true }),
+    []
+  );
+  const pillarMaterial = useMemo(
+    () => new MeshStandardMaterial({ color: PILLAR_COLOR, roughness: 0.7, metalness: 0.15, transparent: true }),
+    []
+  );
+
+  const wallOpacityRef = useRef(1);
+
+  /** Fades the entire shell uniformly (not per-individual-wall) toward
+   * MIN_WALL_OPACITY whenever the camera is within WALL_FADE_DISTANCE of any
+   * one wall plane — moving in close to inspect equipment near a wall
+   * shouldn't have that wall block the view, but the shell should read as
+   * fully solid the rest of the time. "Near a wall" is plane-distance
+   * clamped to that wall's own span (plus a small corner margin), so being
+   * close to one wall doesn't also fade the unrelated far side. */
+  useFrame(({ camera }, delta) => {
+    const distances: number[] = [];
+    if (camera.position.x >= minX - WALL_FADE_LATERAL_MARGIN && camera.position.x <= maxX + WALL_FADE_LATERAL_MARGIN) {
+      distances.push(Math.abs(camera.position.z - minZ), Math.abs(camera.position.z - maxZ));
+    }
+    if (camera.position.z >= minZ - WALL_FADE_LATERAL_MARGIN && camera.position.z <= maxZ + WALL_FADE_LATERAL_MARGIN) {
+      distances.push(Math.abs(camera.position.x - minX), Math.abs(camera.position.x - maxX));
+    }
+    const nearestWallDistance = distances.length > 0 ? Math.min(...distances) : Infinity;
+    const targetOpacity = clamp(nearestWallDistance / WALL_FADE_DISTANCE, MIN_WALL_OPACITY, 1);
+
+    wallOpacityRef.current += (targetOpacity - wallOpacityRef.current) * Math.min(1, delta * WALL_FADE_EASE_RATE);
+    wallMaterial.opacity = wallOpacityRef.current;
+    accentMaterial.opacity = wallOpacityRef.current;
+    pillarMaterial.opacity = wallOpacityRef.current;
+  });
+
   return (
     <group>
       <WallPanel
         position={[(minX + maxX) / 2, wallY, minZ]}
         size={[width + WALL_THICKNESS, WALL_HEIGHT, WALL_THICKNESS]}
         accentOffset={[0, 0, halfThickness]}
+        wallMaterial={wallMaterial}
+        accentMaterial={accentMaterial}
       />
       <WallPanel
         position={[frontLeftCenterX, wallY, maxZ]}
         size={[frontLeftWidth, WALL_HEIGHT, WALL_THICKNESS]}
         accentOffset={[0, 0, -halfThickness]}
+        wallMaterial={wallMaterial}
+        accentMaterial={accentMaterial}
       />
-      <WindowedWallSegment centerX={frontRightCenterX} width={frontRightWidth} z={maxZ} />
+      <WindowedWallSegment
+        centerX={frontRightCenterX}
+        width={frontRightWidth}
+        z={maxZ}
+        wallMaterial={wallMaterial}
+      />
       <WallPanel
         position={[minX, wallY, centerZ]}
         size={[WALL_THICKNESS, WALL_HEIGHT, depth + WALL_THICKNESS]}
         accentOffset={[halfThickness, 0, 0]}
+        wallMaterial={wallMaterial}
+        accentMaterial={accentMaterial}
       />
       <WallPanel
         position={[maxX, wallY, centerZ]}
         size={[WALL_THICKNESS, WALL_HEIGHT, depth + WALL_THICKNESS]}
         accentOffset={[-halfThickness, 0, 0]}
+        wallMaterial={wallMaterial}
+        accentMaterial={accentMaterial}
       />
 
       {pillarPositions.map(([x, z], i) => (
-        <mesh key={i} position={[x, wallY, z]} castShadow>
+        <mesh key={i} position={[x, wallY, z]} castShadow material={pillarMaterial}>
           <boxGeometry args={[PILLAR_SIZE, WALL_HEIGHT + 0.3, PILLAR_SIZE]} />
-          <meshStandardMaterial color={PILLAR_COLOR} roughness={0.7} metalness={0.15} />
         </mesh>
       ))}
     </group>
