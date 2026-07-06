@@ -22,6 +22,18 @@ export const ZONE_CATALOG: Zone[] = [
     cost: 150000,
     requiredLevel: 4,
   },
+  {
+    id: "facility_expansion_3",
+    name: "Facility Expansion III",
+    cost: 400000,
+    requiredLevel: 6,
+  },
+  {
+    id: "facility_expansion_4",
+    name: "Facility Expansion IV",
+    cost: 1000000,
+    requiredLevel: 8,
+  },
 ];
 
 /** World-space landmark NPCs wander to when visiting a zone ambiently. */
@@ -55,6 +67,17 @@ export function getPlayAreaBounds(unlockedZones: string[]): PlayAreaBounds {
   if (unlockedZones.includes("iron_vault")) {
     minX = Math.min(minX, -20);
     minZ = Math.min(minZ, -15);
+  }
+  // Both new tiers extend the same 3 directions the floor already grows in
+  // (cardio_deck -> maxX, iron_vault -> minX/minZ) further, rather than
+  // opening a 4th — maxZ is permanently fixed at MAIN_FLOOR_HALF_SIZE since
+  // that's where the entrance door sits (see the entrance-door spec).
+  if (unlockedZones.includes("facility_expansion_3")) {
+    maxX = Math.max(maxX, 32);
+  }
+  if (unlockedZones.includes("facility_expansion_4")) {
+    minX = Math.min(minX, -32);
+    minZ = Math.min(minZ, -25);
   }
 
   return { minX, maxX, minZ, maxZ };
