@@ -23,6 +23,7 @@ import {
   HEAD_TRAINER_WORKOUT_BONUS,
 } from "@/constants/staff";
 import { createDebouncedSaver, loadJSON } from "@/lib/storage";
+import { AppState } from "react-native";
 
 export const XP_PER_LEVEL = 100;
 export const RENOWN_PER_GYM_LEVEL = 100;
@@ -245,6 +246,16 @@ export function UserProvider({ children }: { children: ReactNode }) {
     isHydrated,
     saver,
   ]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "background" || nextState === "inactive") {
+        saver.flush();
+        setLastActiveTimestamp(Date.now());
+      }
+    });
+    return () => subscription.remove();
+  }, [saver]);
 
   function addXp(amount: number): AddXpResult {
     const totalXp = xp + amount;
