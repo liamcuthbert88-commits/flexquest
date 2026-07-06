@@ -162,7 +162,7 @@ export const EQUIPMENT_CATALOG: Equipment[] = [
     cashPerSecond: 16000,
     requiredLevel: 18,
     color: "#818CF8",
-    gridPosition: { row: -2, col: 7 },
+    gridPosition: { row: -4, col: 6 },
     zoneId: "main_floor",
   },
   {
@@ -172,7 +172,7 @@ export const EQUIPMENT_CATALOG: Equipment[] = [
     cashPerSecond: 28000,
     requiredLevel: 20,
     color: "#2DD4BF",
-    gridPosition: { row: 0, col: 7 },
+    gridPosition: { row: 2, col: 6 },
     zoneId: "main_floor",
   },
 ];
