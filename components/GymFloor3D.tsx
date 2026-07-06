@@ -170,13 +170,6 @@ const POLAR_EASE_RATE = 4;
 const TAP_MAX_DISTANCE_PX = 10;
 const TAP_MAX_DURATION_MS = 300;
 const HIT_RADIUS_PX = 44;
-/** Standard tycoon-game "press and hold to pick up" delay — long enough
- * that a normal tap or the start of a camera-pan drag doesn't accidentally
- * grab an item, short enough that deliberately holding on one doesn't feel
- * laggy. Cancelled if the finger moves more than TAP_MAX_DISTANCE_PX before
- * it fires (that's pan/orbit intent, not hold intent) or if a second finger
- * touches down (pinch intent). */
-const HOLD_MOVE_DURATION_MS = 400;
 const CAMERA_FOV = 50;
 
 /** World units of pan per screen pixel dragged — the ground plane should
@@ -1335,11 +1328,9 @@ function PlacementGhost({
 
 type GymFloorSceneProps = {
   onSelect?: (selection: Selection | null) => void;
-  placingEquipmentId: string | null;
-  onPlacementSettled: () => void;
 };
 
-function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: GymFloorSceneProps) {
+function GymFloorScene({ onSelect }: GymFloorSceneProps) {
   const {
     purchasedEquipmentIds,
     unlockedZones,
@@ -1426,6 +1417,8 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
   equipmentCustomizationsRef.current = equipmentCustomizations;
   const moveEquipmentRef = useRef(moveEquipment);
   moveEquipmentRef.current = moveEquipment;
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
 
   // Live drag state for the Move interaction — a ref (not state) since it
   // updates every touch-move frame; ghostPositionForRender mirrors it into
@@ -1436,25 +1429,15 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
   const dragWorldPositionRef = useRef<[number, number, number] | null>(null);
   const dragTargetCellRef = useRef<GridCell | null>(null);
   const [ghostRenderTick, setGhostRenderTick] = useState(0);
-  const placingEquipmentIdRef = useRef(placingEquipmentId);
-  placingEquipmentIdRef.current = placingEquipmentId;
-  const onPlacementSettledRef = useRef(onPlacementSettled);
-  onPlacementSettledRef.current = onPlacementSettled;
-  // Press-and-hold-to-move: a second, independent way into the same ghost-
-  // drag flow above, alongside the Inspector's Edit -> Move button
-  // (`placingEquipmentIdRef`, driven by the parent's state). This one never
-  // needs to leave GymFloor3D — holding a finger on an owned item's screen
-  // position starts the drag directly, no panel needed, matching how most
-  // tycoon games let you grab an object. `internalHoldIdRef` is the second
-  // source of truth for "what's being placed right now"; every read site
-  // that used to check `placingEquipmentIdRef.current` alone now checks
-  // both (see `getActivePlacementId` below).
+  // Instant drag-to-move: once an item is the active `selection`, a drag
+  // starting on its own screen position (checked at grant time, in
+  // onPanResponderGrant below) arms `internalHoldIdRef` immediately — no
+  // timer. `internalHoldIdRef` is the sole source of truth for "what's
+  // being placed right now."
   const internalHoldIdRef = useRef<string | null>(null);
-  const holdTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const holdStartPositionRef = useRef({ x: 0, y: 0 });
 
   function getActivePlacementId(): string | null {
-    return placingEquipmentIdRef.current ?? internalHoldIdRef.current;
+    return internalHoldIdRef.current;
   }
 
   // Defensive: a prestige reset can sell equipment out from under an active
@@ -1482,45 +1465,42 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
           // standard "grab to stop" behavior.
           panVelocityRef.current = { x: 0, z: 0 };
 
-          // Press-and-hold-to-move: schedule a hit-test at this exact
-          // screen position, timed to fire only if the finger is still
-          // down and hasn't moved (see the cancellation checks in
-          // onPanResponderMove/Release) by the time it fires.
-          holdStartPositionRef.current = {
-            x: evt.nativeEvent.locationX,
-            y: evt.nativeEvent.locationY,
-          };
-          if (holdTimeoutRef.current) clearTimeout(holdTimeoutRef.current);
-          holdTimeoutRef.current = setTimeout(() => {
-            holdTimeoutRef.current = null;
-            if (wasMultiTouchRef.current || getActivePlacementId()) return;
-
-            const { width, height } = layoutSizeRef.current;
-            const hit = findClosestSelection(
-              holdStartPositionRef.current.x,
-              holdStartPositionRef.current.y,
-              ownedEquipmentRef.current,
-              npcRuntimesRef.current,
-              azimuthRef.current,
-              polarRef.current,
-              currentRadiusRef.current + zoomOffsetRef.current,
-              panXRef.current,
-              panZRef.current,
-              width,
-              height,
-              equipmentCustomizationsRef.current
+          // Instant drag-to-move: if an equipment item is already selected,
+          // check whether this touch-down landed on its current screen
+          // position. If so, arm move mode immediately — no delay, no
+          // Inspector round-trip. Dragging that starts anywhere else (or
+          // when nothing/an NPC is selected) falls through to normal
+          // tap/pan handling below, unaffected.
+          if (selectionRef.current?.type === "equipment") {
+            const item = ownedEquipmentRef.current.find(
+              (entry) => entry.id === selectionRef.current!.id
             );
-            if (!hit || hit.type !== "equipment") return;
-
-            const item = ownedEquipmentRef.current.find((entry) => entry.id === hit.id);
-            if (!item) return;
-
-            internalHoldIdRef.current = hit.id;
-            const holdPosition = getEquipmentWorldPosition(item, equipmentCustomizationsRef.current);
-            dragWorldPositionRef.current = [holdPosition[0], 0.8, holdPosition[2]];
-            dragTargetCellRef.current = null;
-            setGhostRenderTick((tick) => tick + 1);
-          }, HOLD_MOVE_DURATION_MS);
+            if (item) {
+              const worldPos = getEquipmentWorldPosition(item, equipmentCustomizationsRef.current);
+              const screenPos = worldToScreen(
+                [worldPos[0], 0.8, worldPos[2]],
+                azimuthRef.current,
+                polarRef.current,
+                currentRadiusRef.current + zoomOffsetRef.current,
+                panXRef.current,
+                panZRef.current,
+                layoutSizeRef.current.width,
+                layoutSizeRef.current.height
+              );
+              if (screenPos) {
+                const distance = Math.hypot(
+                  screenPos.x - evt.nativeEvent.locationX,
+                  screenPos.y - evt.nativeEvent.locationY
+                );
+                if (distance < HIT_RADIUS_PX) {
+                  internalHoldIdRef.current = item.id;
+                  dragWorldPositionRef.current = [worldPos[0], 0.8, worldPos[2]];
+                  dragTargetCellRef.current = null;
+                  setGhostRenderTick((tick) => tick + 1);
+                }
+              }
+            }
+          }
         },
         onPanResponderMove: (evt, gestureState) => {
           const touches = evt.nativeEvent.touches;
@@ -1584,18 +1564,6 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
             pinchStartDistanceRef.current = null;
           }
 
-          // The finger has moved enough that this is clearly a pan/orbit
-          // drag, not a stationary hold — cancel the pending long-press
-          // hit-test so it doesn't fire later and hijack the drag.
-          if (holdTimeoutRef.current) {
-            const movedX = evt.nativeEvent.locationX - holdStartPositionRef.current.x;
-            const movedY = evt.nativeEvent.locationY - holdStartPositionRef.current.y;
-            if (Math.hypot(movedX, movedY) > TAP_MAX_DISTANCE_PX) {
-              clearTimeout(holdTimeoutRef.current);
-              holdTimeoutRef.current = null;
-            }
-          }
-
           const placingId = getActivePlacementId();
           if (placingId) {
             // Placement mode: single-finger drag repositions a ghost
@@ -1605,10 +1573,10 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
             // what used to be separate zones.
             //
             // `placingId` is captured into this local const (rather than
-            // reading `placingEquipmentIdRef.current` again below) so its
-            // type narrows from `string | null` to `string` for the calls
-            // below — TypeScript's control-flow narrowing on a mutable
-            // ref's `.current` property isn't guaranteed to persist across
+            // calling `getActivePlacementId()` again below) so its type
+            // narrows from `string | null` to `string` for the calls below —
+            // TypeScript's control-flow narrowing on a mutable ref's
+            // `.current` property isn't guaranteed to persist across
             // multiple reads the way a local const's narrowing is.
             const { width, height } = layoutSizeRef.current;
             const ground = screenToGroundPosition(
@@ -1666,11 +1634,6 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
           wasMultiTouchRef.current = false;
           pinchStartDistanceRef.current = null;
 
-          if (holdTimeoutRef.current) {
-            clearTimeout(holdTimeoutRef.current);
-            holdTimeoutRef.current = null;
-          }
-
           const placingIdOnRelease = getActivePlacementId();
           if (placingIdOnRelease) {
             const targetCell = dragTargetCellRef.current;
@@ -1681,7 +1644,6 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
             dragTargetCellRef.current = null;
             internalHoldIdRef.current = null;
             setGhostRenderTick((tick) => tick + 1);
-            onPlacementSettledRef.current();
             return;
           }
 
@@ -1911,23 +1873,12 @@ class GymFloorErrorBoundary extends Component<{ children: ReactNode }, BoundaryS
 
 type GymFloor3DProps = {
   onSelect?: (selection: Selection | null) => void;
-  /** Non-null while the player is actively dragging this equipment item to
-   * a new cell — redirects single-finger drag from camera-orbit to
-   * repositioning a ghost preview of the item instead. */
-  placingEquipmentId?: string | null;
-  /** Fired once the drag ends, whether the move committed or was
-   * cancelled — lets the parent clear its own "is placing" state. */
-  onPlacementSettled?: () => void;
 };
 
-export function GymFloor3D({ onSelect, placingEquipmentId, onPlacementSettled }: GymFloor3DProps) {
+export function GymFloor3D({ onSelect }: GymFloor3DProps) {
   return (
     <GymFloorErrorBoundary>
-      <GymFloorScene
-        onSelect={onSelect}
-        placingEquipmentId={placingEquipmentId ?? null}
-        onPlacementSettled={onPlacementSettled ?? (() => {})}
-      />
+      <GymFloorScene onSelect={onSelect} />
     </GymFloorErrorBoundary>
   );
 }

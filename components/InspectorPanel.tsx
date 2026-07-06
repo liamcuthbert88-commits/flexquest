@@ -29,7 +29,6 @@ type Props = {
   onUpgrade: (equipmentId: string) => void;
   onSetColor: (equipmentId: string, color: string) => void;
   onRotate: (equipmentId: string) => void;
-  onStartMove: (equipmentId: string) => void;
   isEditing: boolean;
   onToggleEdit: () => void;
 };
@@ -40,7 +39,6 @@ export function InspectorPanel({
   onUpgrade,
   onSetColor,
   onRotate,
-  onStartMove,
   isEditing,
   onToggleEdit,
 }: Props) {
@@ -120,6 +118,11 @@ export function InspectorPanel({
             <Text style={styles.editToggleText}>{isEditing ? "Done Editing" : "Edit"}</Text>
           </Pressable>
 
+          <View style={styles.moveHintRow}>
+            <Ionicons name="move-outline" size={14} color={colors.textSecondary} />
+            <Text style={styles.moveHintText}>Drag on the floor to move</Text>
+          </View>
+
           {isEditing && (
             <View style={styles.editSection}>
               <Text style={styles.statLabel}>Colour</Text>
@@ -140,13 +143,6 @@ export function InspectorPanel({
                 >
                   <Ionicons name="refresh-outline" size={16} color={colors.textPrimary} />
                   <Text style={styles.editActionButtonText}>Rotate</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.editActionButton}
-                  onPress={() => onStartMove(equipmentItem.id)}
-                >
-                  <Ionicons name="swap-horizontal-outline" size={16} color={colors.textPrimary} />
-                  <Text style={styles.editActionButtonText}>Move</Text>
                 </Pressable>
               </View>
             </View>
@@ -316,6 +312,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
     color: colors.accentPrimary,
+  },
+  moveHintRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    paddingVertical: 2,
+  },
+  moveHintText: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: colors.textSecondary,
   },
   editSection: {
     gap: spacing.sm,
