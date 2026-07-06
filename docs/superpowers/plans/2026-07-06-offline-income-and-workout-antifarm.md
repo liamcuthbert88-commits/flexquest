@@ -108,11 +108,64 @@ to:
   const saver = useRef(createDebouncedSaver(STORAGE_KEY, SAVE_DEBOUNCE_MS)).current;
 ```
 
-Leave the persist effect (lines 193-233, which calls `debouncedSave(stats)` and lists `debouncedSave` as a dependency) referencing the old name for now — Task 3 rewrites that effect's body and dependency array together with the new `AppState` listener, to keep this task's diff focused on the storage-layer change alone.
+Also update the persist effect's call site and dependency array (lines 193-233) so the rename is complete and the file typechecks. Change:
 
-Since `saver` isn't yet used anywhere in `UserContext.tsx` after this rename (the old effect still says `debouncedSave`), this task will **not** typecheck cleanly on its own — that's expected and fixed in Task 3. Skip the typecheck-must-pass gate for this task; instead just confirm the diff is exactly the rename shown above (no other changes).
+```ts
+    debouncedSave(stats);
+  }, [
+    level,
+    xp,
+    cash,
+    purchasedEquipmentIds,
+    purchasedUpgradeIds,
+    hiredManagerIds,
+    renownPoints,
+    gymLevel,
+    completedQuestIds,
+    prestigeCount,
+    currentLocationId,
+    lifetimeCashEarned,
+    unlockedZones,
+    equipmentLevels,
+    hiredStaffIds,
+    equipmentCustomizations,
+    isHydrated,
+    debouncedSave,
+  ]);
+```
 
-- [ ] **Step 4: Commit**
+to:
+
+```ts
+    saver.debouncedSave(stats);
+  }, [
+    level,
+    xp,
+    cash,
+    purchasedEquipmentIds,
+    purchasedUpgradeIds,
+    hiredManagerIds,
+    renownPoints,
+    gymLevel,
+    completedQuestIds,
+    prestigeCount,
+    currentLocationId,
+    lifetimeCashEarned,
+    unlockedZones,
+    equipmentLevels,
+    hiredStaffIds,
+    equipmentCustomizations,
+    isHydrated,
+    saver,
+  ]);
+```
+
+- [ ] **Step 4: Typecheck**
+
+Run: `cd ~/FlexQuest && npx tsc --noEmit`
+Expected: exits 0, no errors. This task's rename is now complete end-to-end (declaration, both call sites, both dependency arrays) — it must typecheck cleanly on its own.
+
+- [ ] **Step 5: Commit**
 
 ```bash
 cd ~/FlexQuest && git add lib/storage.ts contexts/RoutineContext.tsx contexts/UserContext.tsx
@@ -191,18 +244,16 @@ Add after `equipmentCustomizations,` (line 211):
     };
 ```
 
-Also add `lastActiveTimestamp` and `lastWorkoutRewardDate` to that effect's dependency array (lines 214-233), immediately before `isHydrated`:
+Also add `lastActiveTimestamp` and `lastWorkoutRewardDate` to that effect's dependency array (lines 214-233), immediately before `isHydrated`. Task 1 already renamed this effect's call and final dependency entry to `saver`/`saver.debouncedSave` — insert the two new fields just before that entry:
 
 ```ts
     equipmentCustomizations,
     lastActiveTimestamp,
     lastWorkoutRewardDate,
     isHydrated,
-    debouncedSave,
+    saver,
   ]);
 ```
-
-(The `debouncedSave` entry here still refers to the old name — Task 3 replaces it with `saver`/`saver.debouncedSave` when it rewrites this effect. Leave it as-is in this task.)
 
 - [ ] **Step 6: Add the `recordWorkoutReward` action (after `hireStaff`, before `prestigeReset`, i.e. after line 561)**
 
@@ -266,10 +317,10 @@ EOF
 ### Task 3: `AppState`-triggered flush and timestamp stamp
 
 **Files:**
-- Modify: `contexts/UserContext.tsx` (imports, the persist effect from Task 2, new `AppState` effect)
+- Modify: `contexts/UserContext.tsx` (imports, new `AppState` effect)
 
 **Interfaces:**
-- Consumes: `saver` (from Task 1), `setLastActiveTimestamp` (from Task 2).
+- Consumes: `saver` (from Task 1 — already exposes `{ debouncedSave, flush }` and is fully wired into the persist effect by Task 1; nothing left pending), `setLastActiveTimestamp` (from Task 2).
 - Produces: nothing new exported — internal wiring only.
 
 - [ ] **Step 1: Import `AppState`**
@@ -281,69 +332,9 @@ import { createDebouncedSaver, loadJSON } from "@/lib/storage";
 import { AppState } from "react-native";
 ```
 
-- [ ] **Step 2: Finish the `saver` rename left pending from Task 1**
+- [ ] **Step 2: Add the `AppState` effect**
 
-In the persist effect (originally lines 193-233, now shifted slightly by Task 2's additions — locate by the `if (!isHydrated) return;` line inside the effect that builds `stats`), change:
-
-```ts
-    debouncedSave(stats);
-  }, [
-    level,
-    xp,
-    cash,
-    purchasedEquipmentIds,
-    purchasedUpgradeIds,
-    hiredManagerIds,
-    renownPoints,
-    gymLevel,
-    completedQuestIds,
-    prestigeCount,
-    currentLocationId,
-    lifetimeCashEarned,
-    unlockedZones,
-    equipmentLevels,
-    hiredStaffIds,
-    equipmentCustomizations,
-    lastActiveTimestamp,
-    lastWorkoutRewardDate,
-    isHydrated,
-    debouncedSave,
-  ]);
-```
-
-to:
-
-```ts
-    saver.debouncedSave(stats);
-  }, [
-    level,
-    xp,
-    cash,
-    purchasedEquipmentIds,
-    purchasedUpgradeIds,
-    hiredManagerIds,
-    renownPoints,
-    gymLevel,
-    completedQuestIds,
-    prestigeCount,
-    currentLocationId,
-    lifetimeCashEarned,
-    unlockedZones,
-    equipmentLevels,
-    hiredStaffIds,
-    equipmentCustomizations,
-    lastActiveTimestamp,
-    lastWorkoutRewardDate,
-    isHydrated,
-    saver,
-  ]);
-```
-
-Only the call itself (`debouncedSave(stats)` → `saver.debouncedSave(stats)`) and the final dependency entry (`debouncedSave` → `saver`) change — every other line in both the `stats` object above it and this dependency array is unchanged from what Task 2 left in place.
-
-- [ ] **Step 3: Add the `AppState` effect**
-
-Add immediately after that persist effect:
+Add immediately after the persist effect (the one that calls `saver.debouncedSave(stats)`, from Task 1/2):
 
 ```ts
   useEffect(() => {
@@ -357,16 +348,16 @@ Add immediately after that persist effect:
   }, [saver]);
 ```
 
-- [ ] **Step 4: Typecheck**
+- [ ] **Step 3: Typecheck**
 
 Run: `cd ~/FlexQuest && npx tsc --noEmit`
 Expected: exits 0, no errors.
 
-- [ ] **Step 5: Manual smoke check**
+- [ ] **Step 4: Manual smoke check**
 
 Run: `cd ~/FlexQuest && npx expo start` (LAN or tunnel, whichever is reachable — not required to be tunnel mode for this check), open on a device/simulator, background the app (home button), then check the AsyncStorage write happened immediately rather than up to 1.5s later. Simplest verification: make a purchase, immediately background the app within 200ms, reopen — the purchase should have persisted (it would already pass without this change most of the time given the short debounce, so this is a light sanity check, not a rigorous test of the fix — Task 8's manual pass covers the behavior more directly via the offline-earnings scenario, which depends on this flush firing reliably).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 cd ~/FlexQuest && git add contexts/UserContext.tsx
