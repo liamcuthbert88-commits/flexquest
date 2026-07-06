@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import {
@@ -75,6 +75,8 @@ export default function TycoonScreen() {
     injectDevRiches,
     setEquipmentColor,
     rotateEquipment,
+    pendingOfflineEarnings,
+    clearPendingOfflineEarnings,
   } = useUser();
   const [activePage, setActivePage] = useState<GymPageKey>("gymFloor");
   const [activeShopTab, setActiveShopTab] = useState<ShopTabKey>("equipment");
@@ -139,6 +141,17 @@ export default function TycoonScreen() {
       Alert.alert(message, "+$10,000,000 cash and +5,000 Renown injected.");
     }
   }
+
+  useEffect(() => {
+    if (pendingOfflineEarnings == null) return;
+    const message = `+$${pendingOfflineEarnings} earned while you were away.`;
+    if (Platform.OS === "web") {
+      if (typeof window !== "undefined") window.alert(message);
+    } else {
+      Alert.alert("Welcome Back!", message);
+    }
+    clearPendingOfflineEarnings();
+  }, [pendingOfflineEarnings, clearPendingOfflineEarnings]);
 
   /** Leaving the Gym Floor tab clears the 3D selection rather than leaving it
    * stale: GymFloor3D fully unmounts when its tab isn't active (see below),
