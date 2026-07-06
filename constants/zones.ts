@@ -38,10 +38,16 @@ export const ZONE_CATALOG: Zone[] = [
   },
 ];
 
-/** World-space landmark NPCs wander to when visiting a zone ambiently. */
+/** Safely inside the base (n=0, 8x8 tile) bounds — the smallest the floor
+ * can ever be — rather than a position tied to either zone's old, distinct
+ * physical room shape (which no longer exists under the uniform per-zone
+ * growth model). A player can buy zones in any order (purchase depends
+ * only on level/cash, not on owning any other zone first), so a landmark
+ * only needs to be valid regardless of how many zones are actually owned;
+ * basing it on the smallest possible floor achieves that trivially. */
 export const ZONE_LANDMARKS: Record<string, [number, number, number]> = {
-  cardio_deck: [15, 0.3, 0],
-  iron_vault: [-15, 0, -10],
+  cardio_deck: [8, 0.3, 3],
+  iron_vault: [-8, 0, -8],
 };
 
 export type PlayAreaBounds = { minX: number; maxX: number; minZ: number; maxZ: number };

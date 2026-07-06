@@ -580,7 +580,7 @@ export function GymDecor({ bounds, unlockedZones }: GymDecorProps) {
 
       {hasIronVault && (
         <MirrorPanel
-          position={[-15, MIRROR_ELEVATION, bounds.minZ + WALL_MOUNT_INSET]}
+          position={[leftWallX, MIRROR_ELEVATION, bounds.minZ + WALL_MOUNT_INSET]}
           panelWidth={4}
           facingAxis="z"
         />
