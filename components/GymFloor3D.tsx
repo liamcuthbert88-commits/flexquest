@@ -7,7 +7,7 @@ import {
   type MutableRefObject,
   type ReactNode,
 } from "react";
-import { PanResponder, StyleSheet, Text, View } from "react-native";
+import { PanResponder, Platform, StyleSheet, Text, View } from "react-native";
 import { Canvas, useFrame } from "@react-three/fiber/native";
 import { AdditiveBlending, Color, InstancedMesh, Object3D, PerspectiveCamera, Vector3 } from "three";
 
@@ -1034,6 +1034,15 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     borderRadius: radius.lg,
     backgroundColor: colors.surface,
+    // `touchAction` isn't in RN's ViewStyle type (native has no such
+    // concept) but react-native-web forwards it straight through to CSS —
+    // web-only, and only Platform.select's web branch applies it. Without
+    // this, the browser's own default touch handling (pan-scroll, pinch-
+    // zoom) still fires alongside our PanResponder gestures on this exact
+    // element even with the `+html.tsx` viewport meta's user-scalable=no,
+    // since that meta only stops the page-level zoom, not per-element
+    // touch scrolling. `none` hands both gestures entirely to PanResponder.
+    ...Platform.select({ web: { touchAction: "none" } as object, default: {} }),
   },
   fallback: {
     alignItems: "center",
