@@ -19,6 +19,7 @@ import {
   getEquipmentColor,
   getEquipmentRotationStep,
   gridToWorldPosition,
+  type EquipmentCustomization,
 } from "@/constants/equipment";
 import { findNearestValidCell, getOccupiedCells, type GridCell } from "@/constants/equipmentGrid";
 import {
@@ -138,6 +139,13 @@ const POLAR_EASE_RATE = 4;
 const TAP_MAX_DISTANCE_PX = 10;
 const TAP_MAX_DURATION_MS = 300;
 const HIT_RADIUS_PX = 44;
+/** Standard tycoon-game "press and hold to pick up" delay — long enough
+ * that a normal tap or the start of a camera-pan drag doesn't accidentally
+ * grab an item, short enough that deliberately holding on one doesn't feel
+ * laggy. Cancelled if the finger moves more than TAP_MAX_DISTANCE_PX before
+ * it fires (that's pan/orbit intent, not hold intent) or if a second finger
+ * touches down (pinch intent). */
+const HOLD_MOVE_DURATION_MS = 400;
 const CAMERA_FOV = 50;
 
 /** World units of pan per screen pixel dragged — the ground plane should
@@ -166,7 +174,12 @@ const TILE_SEAM_GAP = 0.06;
  * (x=6) instead, reading as "the path to the amenities" rather than a path
  * through the machines. */
 const PATHWAY_COLUMNS = [1, 6];
-const PATHWAY_COLOR: [number, number, number] = [0.42, 0.34, 0.24];
+/** Dark warm brown/tan — same undertone ratio as the original lighter tan
+ * (0.42, 0.34, 0.24) so it still reads as a distinct "polished pathway"
+ * against the surrounding rubber, just scaled down to match the floor's
+ * new near-black baseline. At the old brightness this stood out as a
+ * jarringly bright warm stripe once the rest of the floor darkened. */
+const PATHWAY_COLOR: [number, number, number] = [0.1, 0.08, 0.055];
 /** World-space x of the two pathway strips, derived once from the main
  * floor's original 8-column grid rather than recomputed per-bounds — every
  * zone boundary is a multiple of TILE_SIZE (2.5), so a tile's world x is
@@ -373,19 +386,24 @@ function worldToScreen(
 }
 
 /** The inverse of worldToScreen: given a screen pixel and the same camera
- * parameters (azimuth/polar/orbitRadius, camera always orbiting and looking
- * at the world origin — this file has no camera-pan/target-offset feature,
- * so there is no targetX/targetZ to thread through here either), finds
- * where that pixel's ray intersects the floor's y=0 plane. Used to turn a
- * live finger position into a live world X/Z while dragging an equipment
- * item, replicating the camera the same self-contained way worldToScreen
- * already does rather than reaching into R3F's internal raycasting system. */
+ * parameters (azimuth/polar/orbitRadius/targetX/targetZ — the camera orbits
+ * a pannable ground-plane target, not the fixed origin, matching
+ * worldToScreen exactly), finds where that pixel's ray intersects the
+ * floor's y=0 plane. Used to turn a live finger position into a live world
+ * X/Z while dragging an equipment item, replicating the camera the same
+ * self-contained way worldToScreen already does rather than reaching into
+ * R3F's internal raycasting system. targetX/targetZ are required, not
+ * optional — omitting them would silently mis-track the drag ghost the
+ * moment the camera has been panned away from the origin, exactly the
+ * failure mode worldToScreen's own doc comment warns about. */
 function screenToGroundPosition(
   screenX: number,
   screenY: number,
   azimuth: number,
   polar: number,
   orbitRadius: number,
+  targetX: number,
+  targetZ: number,
   viewWidth: number,
   viewHeight: number
 ): { x: number; z: number } | null {
@@ -393,11 +411,11 @@ function screenToGroundPosition(
 
   const camera = new PerspectiveCamera(CAMERA_FOV, viewWidth / viewHeight, 0.1, 1000);
   camera.position.set(
-    orbitRadius * Math.sin(polar) * Math.sin(azimuth),
+    targetX + orbitRadius * Math.sin(polar) * Math.sin(azimuth),
     orbitRadius * Math.cos(polar),
-    orbitRadius * Math.sin(polar) * Math.cos(azimuth)
+    targetZ + orbitRadius * Math.sin(polar) * Math.cos(azimuth)
   );
-  camera.lookAt(0, 0, 0);
+  camera.lookAt(targetX, 0, targetZ);
   camera.updateMatrixWorld();
 
   const ndcX = (screenX / viewWidth) * 2 - 1;
@@ -429,13 +447,14 @@ function findClosestSelection(
   targetX: number,
   targetZ: number,
   viewWidth: number,
-  viewHeight: number
+  viewHeight: number,
+  equipmentCustomizations: Record<string, EquipmentCustomization>
 ): Selection | null {
   let best: Selection | null = null;
   let bestDistance = HIT_RADIUS_PX;
 
   for (const item of ownedEquipment) {
-    const worldPos = getEquipmentWorldPosition(item);
+    const worldPos = getEquipmentWorldPosition(item, equipmentCustomizations);
     const screenPos = worldToScreen(
       [worldPos[0], 0.8, worldPos[2]],
       azimuth,
@@ -617,8 +636,15 @@ function TiledFloor({ bounds }: { bounds: PlayAreaBounds }) {
         if (isPathway) {
           mesh.setColorAt(index, new Color(...PATHWAY_COLOR));
         } else {
-          const shade = 0.16 + ((row * 7 + col * 3) % 5) * 0.012;
-          mesh.setColorAt(index, new Color(shade, shade, shade + 0.008));
+          // Dark charcoal/near-black interlocking rubber mat — real gym
+          // rubber sits close to black (roughly #050505-#0a0a0a) with only
+          // faint per-tile variation from manufacturing/wear, not the much
+          // lighter mid-grey this used to be. The tiny blue-tinted delta
+          // keeps that subtle variation (still reads as "interlocking
+          // tiles," not a flat slab) without ever brightening a tile enough
+          // to look washed out under the overhead wash light.
+          const shade = 0.02 + ((row * 7 + col * 3) % 5) * 0.004;
+          mesh.setColorAt(index, new Color(shade, shade, shade + 0.003));
         }
         index++;
       }
@@ -633,9 +659,24 @@ function TiledFloor({ bounds }: { bounds: PlayAreaBounds }) {
       ref={meshRef}
       args={[undefined, undefined, tileCountX * tileCountZ]}
       receiveShadow
+      // three.js computes an InstancedMesh's frustum-culling bounding sphere
+      // from its base geometry alone (one small tile plane at the local
+      // origin) — it does NOT expand to cover where setMatrixAt actually
+      // places every instance across the whole floor. That made the entire
+      // floor randomly vanish while orbiting/panning: whenever that tiny,
+      // wrongly-placed bounding sphere happened to fall outside the
+      // frustum, three.js culled the *whole* mesh, even though the real,
+      // visible tiles were still on-screen. Disabling culling for this one
+      // object is the standard fix — it's a single draw call regardless of
+      // instance count, so there's no meaningful cost to always drawing it.
+      frustumCulled={false}
     >
       <planeGeometry args={[TILE_SIZE - TILE_SEAM_GAP, TILE_SIZE - TILE_SEAM_GAP]} />
-      <meshStandardMaterial roughness={0.4} metalness={0.35} />
+      {/* Real rubber is a dielectric (metalness 0) and quite matte — high
+          roughness (0.92) keeps specular highlights soft and diffuse, so
+          the mat absorbs light the way real gym rubber does instead of
+          gleaming like the old metalness:0.35 value did. */}
+      <meshStandardMaterial roughness={0.92} metalness={0} />
     </instancedMesh>
   );
 }
@@ -673,16 +714,31 @@ function GlowLayer({
  * GymFloorScene; adding a real light per fixture here would mean several more
  * shadow-casting/lit sources, which this project has consistently avoided for
  * mobile RAM/perf reasons (see the shared-material and particle-pool patterns
- * elsewhere). Three parallel rows running the depth of the main floor,
- * mirroring a real commercial gym's ceiling grid. */
-function OverheadLedArray() {
-  const rows: number[] = [-6, 0, 6];
-  const fixtureSize: [number, number, number] = [0.4, 0.12, 16];
+ * elsewhere). Parallel rows spanning the *current* play area bounds (not a
+ * fixed main-floor footprint) so the ceiling still reads as evenly lit once
+ * Cardio Deck/Iron Vault unlock and the floor grows well past the original
+ * 20x20 — the actual light (the overhead directionalLight) was always
+ * spatially uniform since directional lights don't fall off with distance,
+ * but these fixture meshes previously stayed fixed to the original
+ * footprint, so the ceiling visually looked unlit over any newly-unlocked
+ * zone even though the floor beneath it wasn't actually darker. */
+function OverheadLedArray({ bounds }: { bounds: PlayAreaBounds }) {
+  const rowSpacing = 6;
+  const rowMargin = 2;
+  const rowCount = Math.max(3, Math.round((bounds.maxX - bounds.minX - rowMargin * 2) / rowSpacing) + 1);
+  const rows: number[] = Array.from({ length: rowCount }, (_, i) =>
+    rowCount === 1
+      ? (bounds.minX + bounds.maxX) / 2
+      : bounds.minX + rowMargin + (i * (bounds.maxX - bounds.minX - rowMargin * 2)) / (rowCount - 1)
+  );
+  const rowCenterZ = (bounds.minZ + bounds.maxZ) / 2;
+  const rowLength = bounds.maxZ - bounds.minZ - rowMargin * 2;
+  const fixtureSize: [number, number, number] = [0.4, 0.12, rowLength];
 
   return (
     <>
       {rows.map((x) => (
-        <mesh key={x} position={[x, 6, 0]}>
+        <mesh key={x} position={[x, 6, rowCenterZ]}>
           <boxGeometry args={fixtureSize} />
           <meshStandardMaterial
             color={LED_FIXTURE_COLOR}
@@ -692,7 +748,7 @@ function OverheadLedArray() {
         </mesh>
       ))}
       {rows.map((x) => (
-        <GlowLayer key={`glow-${x}`} position={[x, 6, 0]} size={fixtureSize} color={LED_FIXTURE_COLOR} />
+        <GlowLayer key={`glow-${x}`} position={[x, 6, rowCenterZ]} size={fixtureSize} color={LED_FIXTURE_COLOR} />
       ))}
     </>
   );
@@ -1080,41 +1136,37 @@ function LockerRoomDoor() {
 }
 
 /** Cardio Deck — shares the same tiled floor as the rest of the facility
- * (see TiledFloor) rather than a raised wood-panel platform of its own; only
- * a thin neon-blue ground strip marks the zone's footprint now. */
+ * (see TiledFloor); a thin neon-blue border traces the zone's perimeter to
+ * mark its footprint, matching NeonPerimeter's own border-strip technique
+ * rather than a full glowing slab. A previous version covered the *entire*
+ * 10x20 zone with one bright emissive plane (plus GlowLayer's additive
+ * bloom scaled to that same full size) — harmless against the old
+ * medium-grey floor, but read as a glaring, out-of-place blue rectangle
+ * once the tile floor darkened to near-black rubber. Thin border strips at
+ * a much lower emissive intensity keep the zone identifiable without
+ * fighting the now much darker, more uniform-reading floor. */
 function CardioDeckZone() {
-  return (
-    <group position={[15, 0, 0]}>
-      <mesh position={[0, 0.04, 0]}>
-        <boxGeometry args={[10.1, 0.05, 20.1]} />
-        <meshStandardMaterial color={CARDIO_BLUE} emissive={CARDIO_BLUE} emissiveIntensity={1.5} />
-      </mesh>
-      <GlowLayer position={[0, 0.04, 0]} size={[10.1, 0.05, 20.1]} color={CARDIO_BLUE} />
-    </group>
-  );
-}
+  const halfWidth = 5;
+  const halfDepth = 10;
+  const stripThickness = 0.15;
 
-/** Iron Vault — shares the same tiled floor as the rest of the facility (see
- * TiledFloor) rather than its own bare concrete slab; only the wireframe
- * "chain-link" panels (a subdivided plane rendered with wireframe:true gives
- * a diamond-grid look without needing a real texture asset) remain to mark
- * the zone. */
-function IronVaultZone() {
-  // Positions are local to this group (already translated to the vault's
-  // world position below) — an "open" cage, so only the back + left sides
-  // are fenced, matching the squat rack's own open-cage look.
-  const fencePositions: { position: [number, number, number]; rotation: [number, number, number] }[] = [
-    { position: [0, 1, -5], rotation: [0, 0, 0] },
-    { position: [-5, 1, 0], rotation: [0, Math.PI / 2, 0] },
+  const strips: { position: [number, number, number]; size: [number, number, number] }[] = [
+    { position: [0, 0.04, -halfDepth], size: [halfWidth * 2, 0.05, stripThickness] },
+    { position: [0, 0.04, halfDepth], size: [halfWidth * 2, 0.05, stripThickness] },
+    { position: [-halfWidth, 0.04, 0], size: [stripThickness, 0.05, halfDepth * 2] },
+    { position: [halfWidth, 0.04, 0], size: [stripThickness, 0.05, halfDepth * 2] },
   ];
 
   return (
-    <group position={[-15, 0, -10]}>
-      {fencePositions.map((fence, i) => (
-        <mesh key={i} position={fence.position} rotation={fence.rotation}>
-          <planeGeometry args={[10, 2, 10, 4]} />
-          <meshStandardMaterial color="#9aa0ac" wireframe />
+    <group position={[15, 0, 0]}>
+      {strips.map((strip, i) => (
+        <mesh key={i} position={strip.position}>
+          <boxGeometry args={strip.size} />
+          <meshStandardMaterial color={CARDIO_BLUE} emissive={CARDIO_BLUE} emissiveIntensity={0.5} />
         </mesh>
+      ))}
+      {strips.map((strip, i) => (
+        <GlowLayer key={`glow-${i}`} position={strip.position} size={strip.size} color={CARDIO_BLUE} />
       ))}
     </group>
   );
@@ -1261,8 +1313,9 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
   // own closured state each UserProvider render) needs the same ref-mirror
   // treatment as onSelectRef/ownedEquipmentRef above, or the drag handler
   // would silently validate/commit against stale data from mount time.
-  const boundsRef = useRef(playAreaBounds);
-  boundsRef.current = playAreaBounds;
+  // boundsRef itself is already declared above (it doubles as the pan-
+  // target clamp bounds for panXRef/panZRef) — reused here rather than
+  // redeclared, since both features need the exact same current value.
   const equipmentCustomizationsRef = useRef(equipmentCustomizations);
   equipmentCustomizationsRef.current = equipmentCustomizations;
   const moveEquipmentRef = useRef(moveEquipment);
@@ -1281,6 +1334,22 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
   placingEquipmentIdRef.current = placingEquipmentId;
   const onPlacementSettledRef = useRef(onPlacementSettled);
   onPlacementSettledRef.current = onPlacementSettled;
+  // Press-and-hold-to-move: a second, independent way into the same ghost-
+  // drag flow above, alongside the Inspector's Edit -> Move button
+  // (`placingEquipmentIdRef`, driven by the parent's state). This one never
+  // needs to leave GymFloor3D — holding a finger on an owned item's screen
+  // position starts the drag directly, no panel needed, matching how most
+  // tycoon games let you grab an object. `internalHoldIdRef` is the second
+  // source of truth for "what's being placed right now"; every read site
+  // that used to check `placingEquipmentIdRef.current` alone now checks
+  // both (see `getActivePlacementId` below).
+  const internalHoldIdRef = useRef<string | null>(null);
+  const holdTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdStartPositionRef = useRef({ x: 0, y: 0 });
+
+  function getActivePlacementId(): string | null {
+    return placingEquipmentIdRef.current ?? internalHoldIdRef.current;
+  }
 
   // Defensive: a prestige reset can sell equipment out from under an active
   // selection — clear it rather than showing a stale inspector for it.
@@ -1296,7 +1365,7 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: () => {
+        onPanResponderGrant: (evt) => {
           lastPan.current = { dx: 0, dy: 0 };
           wasMultiTouchRef.current = false;
           pinchStartDistanceRef.current = null;
@@ -1306,6 +1375,46 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
           // Starting a new touch cancels any residual momentum glide —
           // standard "grab to stop" behavior.
           panVelocityRef.current = { x: 0, z: 0 };
+
+          // Press-and-hold-to-move: schedule a hit-test at this exact
+          // screen position, timed to fire only if the finger is still
+          // down and hasn't moved (see the cancellation checks in
+          // onPanResponderMove/Release) by the time it fires.
+          holdStartPositionRef.current = {
+            x: evt.nativeEvent.locationX,
+            y: evt.nativeEvent.locationY,
+          };
+          if (holdTimeoutRef.current) clearTimeout(holdTimeoutRef.current);
+          holdTimeoutRef.current = setTimeout(() => {
+            holdTimeoutRef.current = null;
+            if (wasMultiTouchRef.current || getActivePlacementId()) return;
+
+            const { width, height } = layoutSizeRef.current;
+            const hit = findClosestSelection(
+              holdStartPositionRef.current.x,
+              holdStartPositionRef.current.y,
+              ownedEquipmentRef.current,
+              npcRuntimesRef.current,
+              azimuthRef.current,
+              polarRef.current,
+              currentRadiusRef.current + zoomOffsetRef.current,
+              panXRef.current,
+              panZRef.current,
+              width,
+              height,
+              equipmentCustomizationsRef.current
+            );
+            if (!hit || hit.type !== "equipment") return;
+
+            const item = ownedEquipmentRef.current.find((entry) => entry.id === hit.id);
+            if (!item) return;
+
+            internalHoldIdRef.current = hit.id;
+            const holdPosition = getEquipmentWorldPosition(item, equipmentCustomizationsRef.current);
+            dragWorldPositionRef.current = [holdPosition[0], 0.8, holdPosition[2]];
+            dragTargetCellRef.current = null;
+            setGhostRenderTick((tick) => tick + 1);
+          }, HOLD_MOVE_DURATION_MS);
         },
         onPanResponderMove: (evt, gestureState) => {
           const touches = evt.nativeEvent.touches;
@@ -1369,7 +1478,19 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
             pinchStartDistanceRef.current = null;
           }
 
-          const placingId = placingEquipmentIdRef.current;
+          // The finger has moved enough that this is clearly a pan/orbit
+          // drag, not a stationary hold — cancel the pending long-press
+          // hit-test so it doesn't fire later and hijack the drag.
+          if (holdTimeoutRef.current) {
+            const movedX = evt.nativeEvent.locationX - holdStartPositionRef.current.x;
+            const movedY = evt.nativeEvent.locationY - holdStartPositionRef.current.y;
+            if (Math.hypot(movedX, movedY) > TAP_MAX_DISTANCE_PX) {
+              clearTimeout(holdTimeoutRef.current);
+              holdTimeoutRef.current = null;
+            }
+          }
+
+          const placingId = getActivePlacementId();
           if (placingId) {
             // Placement mode: single-finger drag repositions a ghost
             // preview instead of orbiting the camera. Two-finger
@@ -1390,6 +1511,8 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
               azimuthRef.current,
               polarRef.current,
               currentRadiusRef.current + zoomOffsetRef.current,
+              panXRef.current,
+              panZRef.current,
               width,
               height
             );
@@ -1437,7 +1560,12 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
           wasMultiTouchRef.current = false;
           pinchStartDistanceRef.current = null;
 
-          const placingIdOnRelease = placingEquipmentIdRef.current;
+          if (holdTimeoutRef.current) {
+            clearTimeout(holdTimeoutRef.current);
+            holdTimeoutRef.current = null;
+          }
+
+          const placingIdOnRelease = getActivePlacementId();
           if (placingIdOnRelease) {
             const targetCell = dragTargetCellRef.current;
             if (targetCell) {
@@ -1445,6 +1573,7 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
             }
             dragWorldPositionRef.current = null;
             dragTargetCellRef.current = null;
+            internalHoldIdRef.current = null;
             setGhostRenderTick((tick) => tick + 1);
             onPlacementSettledRef.current();
             return;
@@ -1470,7 +1599,8 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
               panXRef.current,
               panZRef.current,
               width,
-              height
+              height,
+              equipmentCustomizationsRef.current
             );
             setSelection(result);
             onSelectRef.current?.(result);
@@ -1532,6 +1662,15 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
           shadow-camera-bottom={-SHADOW_FRUSTUM_HALF_SIZE}
           shadow-camera-near={0.5}
           shadow-camera-far={50}
+          // The shadow map's 1024x1024 resolution is fixed, but the area it
+          // covers has grown a lot as zones unlock (up to ~40x25 units) —
+          // coarser texels-per-tile makes shadow-acne self-shadowing
+          // artifacts on the large flat floor more visible, which can read
+          // as flickering as the camera moves and different acne patterns
+          // fall under it. normalBias (rather than a plain depth bias)
+          // offsets along the surface normal, which holds up better on a
+          // mostly-flat floor viewed from many different angles.
+          shadow-normalBias={0.02}
         />
         {/* Bright commercial-gym overhead wash — pure white, straight down,
             no shadows of its own (the angled mood light above already casts
@@ -1554,7 +1693,7 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
 
         <GymWalls bounds={playAreaBounds} />
         <GymDecor bounds={playAreaBounds} unlockedZones={unlockedZones} />
-        <OverheadLedArray />
+        <OverheadLedArray bounds={playAreaBounds} />
         <CeilingBeams />
         <CeilingFans />
         <CeilingVents />
@@ -1562,7 +1701,6 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
         <SmoothieBar />
         <LockerRoomDoor />
         {unlockedZones.includes("cardio_deck") && <CardioDeckZone />}
-        {unlockedZones.includes("iron_vault") && <IronVaultZone />}
 
         {ownedEquipment.map((item) => {
           const position = getEquipmentWorldPosition(item, equipmentCustomizations);
@@ -1608,12 +1746,12 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
           equipmentCustomizations={equipmentCustomizations}
         />
 
-        {placingEquipmentId && dragWorldPositionRef.current && (
+        {getActivePlacementId() && dragWorldPositionRef.current && (
           <PlacementGhost
             dragPosition={dragWorldPositionRef.current}
             targetCell={dragTargetCellRef.current}
             color={getEquipmentColor(
-              EQUIPMENT_CATALOG.find((entry) => entry.id === placingEquipmentId)!,
+              EQUIPMENT_CATALOG.find((entry) => entry.id === getActivePlacementId())!,
               equipmentCustomizations
             )}
           />
