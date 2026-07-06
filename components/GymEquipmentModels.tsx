@@ -637,6 +637,338 @@ function LatPulldownMachineModel({ equipmentId, color, isTopEarner, level, occup
   );
 }
 
+/** Two vertical guide rails with a bar that slides within them (unlike
+ * SquatRackModel's free barbell) — the rails themselves are the visual
+ * distinction from the squat rack. */
+function SmithMachineModel({ equipmentId, color, isTopEarner, level, occupancyRef }: EquipmentModelProps) {
+  const barMaterial = useSignatureMaterial(color, isTopEarner);
+  const barRef = useRef<Group>(null);
+  const repCycleSeconds = getEffectiveRepCycle(level);
+
+  useFrame(({ clock }) => {
+    if (!barRef.current) return;
+    const isOccupied = occupancyRef.current[equipmentId] ?? false;
+    const lift = isOccupied
+      ? Math.sin((clock.elapsedTime * (Math.PI * 2)) / repCycleSeconds) * 0.12
+      : 0;
+    barRef.current.position.y = 1.0 + lift;
+  });
+
+  const railPositions: [number, number][] = [
+    [-0.4, -0.05],
+    [0.4, -0.05],
+  ];
+
+  return (
+    <group>
+      {railPositions.map(([x, z]) => (
+        <mesh key={x} position={[x, 0.9, z]} castShadow>
+          <boxGeometry args={[0.08, 1.9, 0.08]} />
+          <meshStandardMaterial {...METAL_PROPS} />
+        </mesh>
+      ))}
+      <mesh position={[0, 1.85, -0.05]} castShadow>
+        <boxGeometry args={[0.9, 0.08, 0.08]} />
+        <meshStandardMaterial {...METAL_PROPS} />
+      </mesh>
+
+      <group ref={barRef} position={[0, 1.0, -0.05]}>
+        <mesh rotation={[0, 0, Math.PI / 2]} material={barMaterial} castShadow>
+          <cylinderGeometry args={[0.03, 0.03, 0.85, 12]} />
+        </mesh>
+      </group>
+
+      <MachineActivityFX
+        equipmentId={equipmentId}
+        occupancyRef={occupancyRef}
+        color={color}
+        originY={1.0}
+        repCycleSeconds={repCycleSeconds}
+      />
+    </group>
+  );
+}
+
+/** Angled sled that slides along its own incline when occupied — the
+ * incline angle (0.5 rad) is baked into both the sled's rotation and the
+ * axis its position animates along, so it visually slides "into" the
+ * frame rather than just up/down. */
+function LegPressMachineModel({ equipmentId, color, isTopEarner, level, occupancyRef }: EquipmentModelProps) {
+  const padMaterial = useSignatureMaterial(color, isTopEarner);
+  const sledRef = useRef<Group>(null);
+  const repCycleSeconds = getEffectiveRepCycle(level);
+  const inclineAngle = 0.5;
+
+  useFrame(({ clock }) => {
+    if (!sledRef.current) return;
+    const isOccupied = occupancyRef.current[equipmentId] ?? false;
+    const slide = isOccupied
+      ? (Math.sin((clock.elapsedTime * (Math.PI * 2)) / repCycleSeconds) + 1) * 0.15
+      : 0;
+    sledRef.current.position.y = 0.5 + slide * Math.sin(inclineAngle);
+    sledRef.current.position.z = 0.3 - slide * Math.cos(inclineAngle);
+  });
+
+  return (
+    <group>
+      <mesh position={[0, 0.25, -0.3]} rotation={[inclineAngle, 0, 0]} castShadow>
+        <boxGeometry args={[0.7, 0.08, 1.1]} />
+        <meshStandardMaterial color="#2a2c33" roughness={0.6} metalness={0.15} />
+      </mesh>
+      <mesh position={[-0.35, 0.5, -0.75]} rotation={[inclineAngle, 0, 0]} castShadow>
+        <boxGeometry args={[0.06, 0.9, 0.06]} />
+        <meshStandardMaterial {...METAL_PROPS} />
+      </mesh>
+      <mesh position={[0.35, 0.5, -0.75]} rotation={[inclineAngle, 0, 0]} castShadow>
+        <boxGeometry args={[0.06, 0.9, 0.06]} />
+        <meshStandardMaterial {...METAL_PROPS} />
+      </mesh>
+
+      <group ref={sledRef} position={[0, 0.5, 0.3]} rotation={[inclineAngle, 0, 0]}>
+        <mesh material={padMaterial} castShadow>
+          <boxGeometry args={[0.6, 0.5, 0.08]} />
+        </mesh>
+      </group>
+
+      <MachineActivityFX
+        equipmentId={equipmentId}
+        occupancyRef={occupancyRef}
+        color={color}
+        originY={0.5}
+        repCycleSeconds={repCycleSeconds}
+      />
+    </group>
+  );
+}
+
+/** A seat that slides back/forth on a low rail while a handle (attached via
+ * a thin chain-like cylinder) extends away from the flywheel housing in
+ * the opposite phase — the two move oppositely, same rep cycle. */
+function RowingMachineModel({ equipmentId, color, isTopEarner, level, occupancyRef }: EquipmentModelProps) {
+  const handleMaterial = useSignatureMaterial(color, isTopEarner);
+  const seatRef = useRef<Mesh>(null);
+  const handleRef = useRef<Group>(null);
+  const repCycleSeconds = getEffectiveRepCycle(level);
+
+  useFrame(({ clock }) => {
+    const isOccupied = occupancyRef.current[equipmentId] ?? false;
+    const phase = isOccupied
+      ? Math.sin((clock.elapsedTime * (Math.PI * 2)) / repCycleSeconds)
+      : 0;
+    if (seatRef.current) seatRef.current.position.z = 0.2 + phase * 0.25;
+    if (handleRef.current) handleRef.current.position.z = -0.9 - phase * 0.35;
+  });
+
+  return (
+    <group>
+      <mesh position={[0, 0.1, -0.3]} castShadow>
+        <boxGeometry args={[0.25, 0.06, 1.8]} />
+        <meshStandardMaterial {...METAL_PROPS} />
+      </mesh>
+
+      <mesh position={[0, 0.25, -1.05]} castShadow>
+        <cylinderGeometry args={[0.22, 0.22, 0.12, 16]} />
+        <meshStandardMaterial color="#1c1e24" roughness={0.6} metalness={0.15} />
+      </mesh>
+
+      <mesh ref={seatRef} position={[0, 0.18, 0.2]} castShadow>
+        <boxGeometry args={[0.35, 0.06, 0.3]} />
+        <meshStandardMaterial color="#2a2c33" roughness={0.5} metalness={0.1} />
+      </mesh>
+
+      <group ref={handleRef} position={[0, 0.3, -0.9]}>
+        <mesh position={[0, 0, 0.4]} castShadow>
+          <cylinderGeometry args={[0.012, 0.012, 0.8, 6]} />
+          <meshStandardMaterial color="#111318" metalness={0.3} roughness={0.5} />
+        </mesh>
+        <mesh rotation={[0, 0, Math.PI / 2]} material={handleMaterial} castShadow>
+          <cylinderGeometry args={[0.025, 0.025, 0.4, 12]} />
+        </mesh>
+      </group>
+
+      <MachineActivityFX
+        equipmentId={equipmentId}
+        occupancyRef={occupancyRef}
+        color={color}
+        originY={0.3}
+        repCycleSeconds={repCycleSeconds}
+      />
+    </group>
+  );
+}
+
+/** Continuous spinning fan wheel + pedals (unlike the other cyclic models,
+ * this one always spins while occupied at a constant rate rather than
+ * oscillating a rep — speed still scales with getSpeedMultiplier(level),
+ * matching TreadmillModel's continuous-motion pattern more than
+ * SquatRackModel's discrete-rep one). */
+function AssaultBikeModel({ equipmentId, color, isTopEarner, level, occupancyRef }: EquipmentModelProps) {
+  const frameMaterial = useSignatureMaterial(color, isTopEarner);
+  const fanRef = useRef<Group>(null);
+  const pedalsRef = useRef<Group>(null);
+  const speedMultiplier = getSpeedMultiplier(level);
+
+  useFrame((_, delta) => {
+    const isOccupied = occupancyRef.current[equipmentId] ?? false;
+    if (!isOccupied) return;
+    const spin = delta * 6 * speedMultiplier;
+    if (fanRef.current) fanRef.current.rotation.z += spin;
+    if (pedalsRef.current) pedalsRef.current.rotation.x += spin;
+  });
+
+  return (
+    <group>
+      <mesh position={[0, 0.9, 0]} material={frameMaterial} castShadow>
+        <boxGeometry args={[0.1, 0.5, 0.1]} />
+      </mesh>
+      <mesh position={[0, 0.35, 0.3]} castShadow>
+        <boxGeometry args={[0.12, 0.7, 0.12]} />
+        <meshStandardMaterial {...METAL_PROPS} />
+      </mesh>
+
+      <group ref={fanRef} position={[0, 1.15, 0]}>
+        <mesh castShadow>
+          <cylinderGeometry args={[0.35, 0.35, 0.04, 20]} />
+          <meshStandardMaterial color="#2a2c33" roughness={0.5} metalness={0.3} />
+        </mesh>
+      </group>
+
+      <group ref={pedalsRef} position={[0, 0.25, 0.3]}>
+        {[0, Math.PI].map((angle) => (
+          <mesh key={angle} position={[0, Math.sin(angle) * 0.15, Math.cos(angle) * 0.15]} castShadow>
+            <boxGeometry args={[0.14, 0.04, 0.08]} />
+            <meshStandardMaterial color="#111318" metalness={0.4} roughness={0.4} />
+          </mesh>
+        ))}
+      </group>
+
+      <MachineActivityFX
+        equipmentId={equipmentId}
+        occupancyRef={occupancyRef}
+        color={color}
+        originY={0.9}
+        repCycleSeconds={getEffectiveRepCycle(level)}
+      />
+    </group>
+  );
+}
+
+/** Twin vertical towers (wider stance than CableCrossoverTowerModel) with a
+ * swinging crossbar/handle assembly — the handle swings side to side rather
+ * than sliding on a column, the visual distinction from the cable tower. */
+function FunctionalTrainerRigModel({ equipmentId, color, isTopEarner, level, occupancyRef }: EquipmentModelProps) {
+  const handleMaterial = useSignatureMaterial(color, isTopEarner);
+  const handleRef = useRef<Group>(null);
+  const repCycleSeconds = getEffectiveRepCycle(level);
+
+  useFrame(({ clock }) => {
+    if (!handleRef.current) return;
+    const isOccupied = occupancyRef.current[equipmentId] ?? false;
+    const swing = isOccupied
+      ? Math.sin((clock.elapsedTime * (Math.PI * 2)) / repCycleSeconds) * 0.3
+      : 0;
+    handleRef.current.rotation.z = swing;
+  });
+
+  const towerXs = [-0.65, 0.65];
+
+  return (
+    <group>
+      {towerXs.map((x) => (
+        <mesh key={x} position={[x, 1.1, 0]} castShadow>
+          <boxGeometry args={[0.12, 2.2, 0.12]} />
+          <meshStandardMaterial {...METAL_PROPS} />
+        </mesh>
+      ))}
+      <mesh position={[0, 2.15, 0]} castShadow>
+        <boxGeometry args={[1.4, 0.1, 0.1]} />
+        <meshStandardMaterial {...METAL_PROPS} />
+      </mesh>
+
+      {towerXs.map((x) => (
+        <mesh key={`pulley-${x}`} position={[x, 1.6, 0.08]} castShadow>
+          <cylinderGeometry args={[0.08, 0.08, 0.08, 12]} />
+          <meshStandardMaterial color="#1c1e24" roughness={0.6} metalness={0.2} />
+        </mesh>
+      ))}
+
+      <group ref={handleRef} position={[0, 1.6, 0.15]}>
+        <mesh rotation={[0, 0, Math.PI / 2]} material={handleMaterial} castShadow>
+          <cylinderGeometry args={[0.025, 0.025, 0.5, 12]} />
+        </mesh>
+      </group>
+
+      <MachineActivityFX
+        equipmentId={equipmentId}
+        occupancyRef={occupancyRef}
+        color={color}
+        originY={1.6}
+        repCycleSeconds={repCycleSeconds}
+      />
+    </group>
+  );
+}
+
+/** A low platform with rack posts and a barbell that lifts off it — visually
+ * closest to SquatRackModel, distinguished by the flat lifting platform its
+ * posts sit on (a real Olympic platform is a physical, distinct piece of
+ * equipment from a squat rack). */
+function OlympicPlatformRackModel({ equipmentId, color, isTopEarner, level, occupancyRef }: EquipmentModelProps) {
+  const barMaterial = useSignatureMaterial(color, isTopEarner);
+  const barbellRef = useRef<Group>(null);
+  const repCycleSeconds = getEffectiveRepCycle(level);
+
+  useFrame(({ clock }) => {
+    if (!barbellRef.current) return;
+    const isOccupied = occupancyRef.current[equipmentId] ?? false;
+    const lift = isOccupied
+      ? Math.sin((clock.elapsedTime * (Math.PI * 2)) / repCycleSeconds) * 0.1
+      : 0;
+    barbellRef.current.position.y = 1.05 + lift;
+  });
+
+  const postPositions: [number, number][] = [
+    [-0.4, -0.4],
+    [0.4, -0.4],
+  ];
+
+  return (
+    <group>
+      <mesh position={[0, 0.03, 0]} receiveShadow>
+        <boxGeometry args={[1.6, 0.06, 1.6]} />
+        <meshStandardMaterial color="#3d2b1f" roughness={0.7} metalness={0.05} />
+      </mesh>
+
+      {postPositions.map(([x, z]) => (
+        <mesh key={`${x}-${z}`} position={[x, 0.85, z]} castShadow>
+          <cylinderGeometry args={[0.045, 0.045, 1.7, 12]} />
+          <meshStandardMaterial {...METAL_PROPS} />
+        </mesh>
+      ))}
+      {[0.25, 1.6].map((y) => (
+        <mesh key={y} position={[0, y, -0.4]} rotation={[0, 0, Math.PI / 2]} castShadow>
+          <cylinderGeometry args={[0.035, 0.035, 0.8, 12]} />
+          <meshStandardMaterial {...METAL_PROPS} />
+        </mesh>
+      ))}
+
+      <group ref={barbellRef} position={[0, 1.05, 0]}>
+        <mesh rotation={[0, 0, Math.PI / 2]} material={barMaterial} castShadow>
+          <cylinderGeometry args={[0.03, 0.03, 0.8, 12]} />
+        </mesh>
+      </group>
+
+      <MachineActivityFX
+        equipmentId={equipmentId}
+        occupancyRef={occupancyRef}
+        color={color}
+        originY={1.05}
+        repCycleSeconds={repCycleSeconds}
+      />
+    </group>
+  );
+}
+
 // Keyed by the ids in constants/equipment.ts — each model is hand-built for
 // one specific catalog entry, not a generic renderer.
 const MODELS_BY_EQUIPMENT_ID: Record<string, ComponentType<EquipmentModelProps>> = {
@@ -646,6 +978,12 @@ const MODELS_BY_EQUIPMENT_ID: Record<string, ComponentType<EquipmentModelProps>>
   "cardio-treadmill": TreadmillModel,
   "cable-crossover-tower": CableCrossoverTowerModel,
   "lat-pulldown-machine": LatPulldownMachineModel,
+  "smith-machine": SmithMachineModel,
+  "leg-press-machine": LegPressMachineModel,
+  "rowing-machine": RowingMachineModel,
+  "assault-bike": AssaultBikeModel,
+  "functional-trainer-rig": FunctionalTrainerRigModel,
+  "olympic-platform-rack": OlympicPlatformRackModel,
 };
 
 type GymEquipmentProps = {
