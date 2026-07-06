@@ -83,7 +83,6 @@ export default function TycoonScreen() {
   const [cashPopups, setCashPopups] = useState<CashPopup[]>([]);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [isEditingEquipment, setIsEditingEquipment] = useState(false);
-  const [placingEquipmentId, setPlacingEquipmentId] = useState<string | null>(null);
 
   const renownFillPercent = Math.min(100, Math.max(0, (renownPoints / renownToNextGymLevel) * 100));
 
@@ -186,8 +185,6 @@ export default function TycoonScreen() {
                 setSelection(next);
                 setIsEditingEquipment(false);
               }}
-              placingEquipmentId={placingEquipmentId}
-              onPlacementSettled={() => setPlacingEquipmentId(null)}
             />
             <InspectorPanel
               selection={selection}
@@ -199,7 +196,6 @@ export default function TycoonScreen() {
               onToggleEdit={() => setIsEditingEquipment((prev) => !prev)}
               onSetColor={setEquipmentColor}
               onRotate={rotateEquipment}
-              onStartMove={(equipmentId) => setPlacingEquipmentId(equipmentId)}
               onUpgrade={handleUpgradeEquipment}
             />
           </View>
