@@ -140,6 +140,8 @@ type UserContextValue = {
   moveEquipment: (equipmentId: string, row: number, col: number) => boolean;
   lastWorkoutRewardDate: string;
   recordWorkoutReward: (date: string) => void;
+  pendingOfflineEarnings: number | null;
+  clearPendingOfflineEarnings: () => void;
 };
 
 const UserContext = createContext<UserContextValue | undefined>(undefined);
@@ -165,6 +167,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   >({});
   const [lastActiveTimestamp, setLastActiveTimestamp] = useState(0);
   const [lastWorkoutRewardDate, setLastWorkoutRewardDate] = useState("");
+  const [pendingOfflineEarnings, setPendingOfflineEarnings] = useState<number | null>(null);
   const [isHydrated, setIsHydrated] = useState(false);
   const saver = useRef(createDebouncedSaver(STORAGE_KEY, SAVE_DEBOUNCE_MS)).current;
 
@@ -192,6 +195,46 @@ export function UserProvider({ children }: { children: ReactNode }) {
         setEquipmentCustomizations(stored.equipmentCustomizations);
         setLastActiveTimestamp(stored.lastActiveTimestamp);
         setLastWorkoutRewardDate(stored.lastWorkoutRewardDate);
+
+        if (stored.lastActiveTimestamp > 0) {
+          const restoredLocation = getLocation(stored.currentLocationId);
+          const restoredGlobalMultiplier =
+            (1 + stored.prestigeCount * 0.5) * restoredLocation.multiplier;
+
+          const hasIronVaultTrainer = stored.hiredStaffIds.includes("coach_sarah");
+          const staffEquipmentBonusMultiplier =
+            1 +
+            (stored.hiredStaffIds.includes("tech_alex") ? EQUIPMENT_TECHNICIAN_BONUS : 0) +
+            (stored.hiredStaffIds.includes("trainer_mike") ? HEAD_TRAINER_EQUIPMENT_BONUS : 0);
+
+          const restoredEquipmentIncome = EQUIPMENT_CATALOG.filter((item) =>
+            stored.purchasedEquipmentIds.includes(item.id)
+          ).reduce((total, item) => {
+            const base = item.cashPerSecond * (stored.equipmentLevels[item.id] ?? 1);
+            const ironVaultBonus =
+              item.zoneId === "iron_vault" && hasIronVaultTrainer ? TRAINER_IRON_VAULT_MULTIPLIER : 1;
+            return total + base * ironVaultBonus * staffEquipmentBonusMultiplier;
+          }, 0);
+
+          const restoredManagerIncome = MANAGER_CATALOG.filter((manager) =>
+            stored.hiredManagerIds.includes(manager.id)
+          ).reduce((total, manager) => total + manager.cashPerSecond, 0);
+
+          const restoredCashPerSecond =
+            (restoredEquipmentIncome + restoredManagerIncome) * restoredGlobalMultiplier;
+
+          const elapsedMs = Math.min(
+            Math.max(Date.now() - stored.lastActiveTimestamp, 0),
+            8 * 60 * 60 * 1000
+          );
+          const offlineEarnings = Math.round((elapsedMs / 1000) * restoredCashPerSecond);
+
+          if (offlineEarnings > 0) {
+            setCash((prev) => prev + offlineEarnings);
+            setLifetimeCashEarned((prev) => prev + offlineEarnings);
+            setPendingOfflineEarnings(offlineEarnings);
+          }
+        }
       }
       setIsHydrated(true);
     });
@@ -589,6 +632,10 @@ export function UserProvider({ children }: { children: ReactNode }) {
     setLastWorkoutRewardDate(date);
   }
 
+  function clearPendingOfflineEarnings(): void {
+    setPendingOfflineEarnings(null);
+  }
+
   function prestigeReset(targetLocationId: string): boolean {
     const target = LOCATION_CATALOG.find((entry) => entry.id === targetLocationId);
     if (!target) return false;
@@ -667,6 +714,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
       moveEquipment,
       lastWorkoutRewardDate,
       recordWorkoutReward,
+      pendingOfflineEarnings,
+      clearPendingOfflineEarnings,
     }),
     [
       level,
@@ -690,6 +739,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       hiredStaffIds,
       equipmentCustomizations,
       lastWorkoutRewardDate,
+      pendingOfflineEarnings,
     ]
   );
 
