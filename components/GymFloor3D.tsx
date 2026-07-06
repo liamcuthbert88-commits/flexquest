@@ -114,6 +114,15 @@ const LED_FIXTURE_COLOR = "#ffffff";
 
 const MIN_ZOOM_OFFSET = -4;
 const MAX_ZOOM_OFFSET = 6;
+/** Hard ceiling on camera height, independent of the polar/zoom easing above
+ * — without it, zooming out far enough (BASE_ORBIT_RADIUS growing with
+ * purchased zones, plus MAX_ZOOM_OFFSET) lifts the camera above the LED
+ * array (y=6) and ceiling beams (y=6.6), looking down at their topside,
+ * which reads as "seeing the roof" instead of staying under the fixtures
+ * where only their floor shadows should be visible. Set just under the LED
+ * array's height, not the beams', since the LED array is the denser/more
+ * visually dominant of the two. */
+const MAX_CAMERA_HEIGHT = 5.5;
 const PINCH_ZOOM_SPEED = 0.02;
 /** 1:1 — twisting two fingers 90° rotates the camera 90°, the natural direct-
  * manipulation feel for a twist gesture (matching e.g. iOS's photo pinch-
@@ -571,6 +580,12 @@ function CameraRig({
     const orbitRadius = currentRadiusRef.current + zoomOffsetRef.current;
     const targetPolar = getZoomLinkedPolar(orbitRadius);
     polarRef.current += (targetPolar - polarRef.current) * Math.min(1, delta * POLAR_EASE_RATE);
+    // Larger polar = lower camera height (∝ cos(polar)) — flooring it here
+    // (not capping the derived Y directly) keeps every other consumer of
+    // polarRef.current (screenToWorld/worldToScreen for tap and placement
+    // raycasting) consistent with what's actually rendered.
+    const minPolarForHeightCap = Math.acos(clamp(MAX_CAMERA_HEIGHT / orbitRadius, -1, 1));
+    polarRef.current = Math.max(polarRef.current, minPolarForHeightCap);
 
     const azimuth = azimuthRef.current;
     const polar = polarRef.current;
