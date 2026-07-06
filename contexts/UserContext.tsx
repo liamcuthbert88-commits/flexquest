@@ -14,7 +14,14 @@ import { MANAGER_CATALOG } from "@/constants/managers";
 import { QUEST_CATALOG, type Quest, type QuestContext } from "@/constants/quests";
 import { LOCATION_CATALOG, getLocation, type Location } from "@/constants/locations";
 import { ZONE_CATALOG, MAIN_FLOOR_ZONE_ID, getPlayAreaBounds } from "@/constants/zones";
-import { STAFF_CATALOG, TRAINER_IRON_VAULT_MULTIPLIER } from "@/constants/staff";
+import {
+  STAFF_CATALOG,
+  TRAINER_IRON_VAULT_MULTIPLIER,
+  EQUIPMENT_TECHNICIAN_BONUS,
+  MARKETING_SPECIALIST_BONUS,
+  HEAD_TRAINER_EQUIPMENT_BONUS,
+  HEAD_TRAINER_WORKOUT_BONUS,
+} from "@/constants/staff";
 import { createDebouncedSaver, loadJSON } from "@/lib/storage";
 
 export const XP_PER_LEVEL = 100;
@@ -334,6 +341,10 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   const rawCashPerSecond = useMemo(() => {
     const hasIronVaultTrainer = hiredStaffIds.includes("coach_sarah");
+    const staffEquipmentBonusMultiplier =
+      1 +
+      (hiredStaffIds.includes("tech_alex") ? EQUIPMENT_TECHNICIAN_BONUS : 0) +
+      (hiredStaffIds.includes("trainer_mike") ? HEAD_TRAINER_EQUIPMENT_BONUS : 0);
 
     const equipmentIncome = EQUIPMENT_CATALOG.filter((item) =>
       purchasedEquipmentIds.includes(item.id)
@@ -342,7 +353,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       const ironVaultBonus = item.zoneId === "iron_vault" && hasIronVaultTrainer
         ? TRAINER_IRON_VAULT_MULTIPLIER
         : 1;
-      return total + base * ironVaultBonus;
+      return total + base * ironVaultBonus * staffEquipmentBonusMultiplier;
     }, 0);
 
     const managerIncome = MANAGER_CATALOG.filter((manager) =>
@@ -355,12 +366,16 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const cashPerSecond = rawCashPerSecond * globalMultiplier;
 
   const cashRewardMultiplier = useMemo(() => {
-    const bonus = UPGRADE_CATALOG.filter((upgrade) =>
+    const upgradeBonus = UPGRADE_CATALOG.filter((upgrade) =>
       purchasedUpgradeIds.includes(upgrade.id)
     ).reduce((total, upgrade) => total + upgrade.cashBonus, 0);
 
-    return 1 + bonus;
-  }, [purchasedUpgradeIds]);
+    const staffWorkoutBonus =
+      (hiredStaffIds.includes("marketer_jess") ? MARKETING_SPECIALIST_BONUS : 0) +
+      (hiredStaffIds.includes("trainer_mike") ? HEAD_TRAINER_WORKOUT_BONUS : 0);
+
+    return 1 + upgradeBonus + staffWorkoutBonus;
+  }, [purchasedUpgradeIds, hiredStaffIds]);
 
   useEffect(() => {
     if (cashPerSecond <= 0) return;
