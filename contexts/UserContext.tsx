@@ -61,6 +61,8 @@ type PersistedUserStats = {
   equipmentLevels: Record<string, number>;
   hiredStaffIds: string[];
   equipmentCustomizations: Record<string, EquipmentCustomization>;
+  lastActiveTimestamp: number;
+  lastWorkoutRewardDate: string;
 };
 
 function isValidPersistedStats(value: unknown): value is PersistedUserStats {
@@ -84,7 +86,9 @@ function isValidPersistedStats(value: unknown): value is PersistedUserStats {
     stats.equipmentLevels !== null &&
     Array.isArray(stats.hiredStaffIds) &&
     typeof stats.equipmentCustomizations === "object" &&
-    stats.equipmentCustomizations !== null
+    stats.equipmentCustomizations !== null &&
+    typeof stats.lastActiveTimestamp === "number" &&
+    typeof stats.lastWorkoutRewardDate === "string"
   );
 }
 
@@ -133,6 +137,8 @@ type UserContextValue = {
   setEquipmentColor: (equipmentId: string, color: string) => void;
   rotateEquipment: (equipmentId: string) => void;
   moveEquipment: (equipmentId: string, row: number, col: number) => boolean;
+  lastWorkoutRewardDate: string;
+  recordWorkoutReward: (date: string) => void;
 };
 
 const UserContext = createContext<UserContextValue | undefined>(undefined);
@@ -156,6 +162,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [equipmentCustomizations, setEquipmentCustomizations] = useState<
     Record<string, EquipmentCustomization>
   >({});
+  const [lastActiveTimestamp, setLastActiveTimestamp] = useState(0);
+  const [lastWorkoutRewardDate, setLastWorkoutRewardDate] = useState("");
   const [isHydrated, setIsHydrated] = useState(false);
   const saver = useRef(createDebouncedSaver(STORAGE_KEY, SAVE_DEBOUNCE_MS)).current;
 
@@ -181,6 +189,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
         setEquipmentLevels(stored.equipmentLevels);
         setHiredStaffIds(stored.hiredStaffIds);
         setEquipmentCustomizations(stored.equipmentCustomizations);
+        setLastActiveTimestamp(stored.lastActiveTimestamp);
+        setLastWorkoutRewardDate(stored.lastWorkoutRewardDate);
       }
       setIsHydrated(true);
     });
@@ -209,6 +219,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
       equipmentLevels,
       hiredStaffIds,
       equipmentCustomizations,
+      lastActiveTimestamp,
+      lastWorkoutRewardDate,
     };
     saver.debouncedSave(stats);
   }, [
@@ -228,6 +240,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
     equipmentLevels,
     hiredStaffIds,
     equipmentCustomizations,
+    lastActiveTimestamp,
+    lastWorkoutRewardDate,
     isHydrated,
     saver,
   ]);
@@ -560,6 +574,10 @@ export function UserProvider({ children }: { children: ReactNode }) {
     return { success: true, ...questResult };
   }
 
+  function recordWorkoutReward(date: string): void {
+    setLastWorkoutRewardDate(date);
+  }
+
   function prestigeReset(targetLocationId: string): boolean {
     const target = LOCATION_CATALOG.find((entry) => entry.id === targetLocationId);
     if (!target) return false;
@@ -636,6 +654,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
       setEquipmentColor,
       rotateEquipment,
       moveEquipment,
+      lastWorkoutRewardDate,
+      recordWorkoutReward,
     }),
     [
       level,
@@ -658,6 +678,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       unlockedZones,
       hiredStaffIds,
       equipmentCustomizations,
+      lastWorkoutRewardDate,
     ]
   );
 
