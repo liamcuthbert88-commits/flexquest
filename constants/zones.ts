@@ -92,3 +92,12 @@ export function getPlayAreaBounds(unlockedZones: string[]): PlayAreaBounds {
  * truth now. */
 export const SMOOTHIE_BAR_POSITION: [number, number, number] = [-6, 0, -6];
 export const LOCKER_POSITION: [number, number, number] = [6, 0, -6];
+
+/** How far beyond the play-area walls the exterior apron (road, parking,
+ * sidewalk) extends. Chosen generously — large enough that, combined with
+ * the zoom-linked camera tilt (see GymFloor3D.tsx's getZoomLinkedPolar),
+ * the ground plane comfortably fills the frame even at max zoom-out. An
+ * empirically-tuned constant, same style as this file's other camera/scene
+ * boundary values (e.g. MAX_CAMERA_HEIGHT) — adjust if playtesting shows
+ * the apron's edge is still visible. */
+export const EXTERIOR_RING_WIDTH = 14;
