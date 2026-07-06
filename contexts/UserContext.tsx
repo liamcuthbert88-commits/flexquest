@@ -157,7 +157,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     Record<string, EquipmentCustomization>
   >({});
   const [isHydrated, setIsHydrated] = useState(false);
-  const debouncedSave = useRef(createDebouncedSaver(STORAGE_KEY, SAVE_DEBOUNCE_MS)).current;
+  const saver = useRef(createDebouncedSaver(STORAGE_KEY, SAVE_DEBOUNCE_MS)).current;
 
   useEffect(() => {
     let cancelled = false;
@@ -210,7 +210,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       hiredStaffIds,
       equipmentCustomizations,
     };
-    debouncedSave(stats);
+    saver.debouncedSave(stats);
   }, [
     level,
     xp,
@@ -229,7 +229,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     hiredStaffIds,
     equipmentCustomizations,
     isHydrated,
-    debouncedSave,
+    saver,
   ]);
 
   function addXp(amount: number): AddXpResult {

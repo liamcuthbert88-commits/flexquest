@@ -24,15 +24,28 @@ export async function saveJSON(key: string, value: unknown): Promise<void> {
 
 /** Builds a debounced saver for `key`: rapid calls (e.g. a burst of idle-cash
  * ticks or quick purchases) coalesce into a single write `delayMs` after the
- * last call, instead of hitting disk on every state change. */
+ * last call, instead of hitting disk on every state change. `flush()` writes
+ * immediately if a save is pending (e.g. on app backgrounding) — a no-op
+ * otherwise. */
 export function createDebouncedSaver(key: string, delayMs: number) {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  let pendingValue: unknown;
 
-  return function debouncedSave(value: unknown) {
+  function debouncedSave(value: unknown) {
+    pendingValue = value;
     if (timeoutId) clearTimeout(timeoutId);
     timeoutId = setTimeout(() => {
       timeoutId = null;
-      saveJSON(key, value);
+      saveJSON(key, pendingValue);
     }, delayMs);
-  };
+  }
+
+  function flush() {
+    if (timeoutId === null) return;
+    clearTimeout(timeoutId);
+    timeoutId = null;
+    saveJSON(key, pendingValue);
+  }
+
+  return { debouncedSave, flush };
 }
