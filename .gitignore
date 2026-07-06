@@ -32,6 +32,7 @@ yarn-error.*
 
 # Claude Code local settings
 .claude/
+.superpowers/
 
 # local env files
 .env*.local
