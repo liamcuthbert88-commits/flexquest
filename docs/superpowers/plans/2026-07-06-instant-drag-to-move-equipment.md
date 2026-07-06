@@ -678,6 +678,11 @@ Expected: the item stays exactly at its original position.
 With an item selected, start a drag from a different part of the screen (not on the selected item).
 Expected: the camera pans/orbits normally; the selected item does not move.
 
+- [ ] **Step 5b: Verify tapping a different item reselects, not moves the first**
+
+With item A selected, tap directly on a different owned item B (not a drag, a plain tap).
+Expected: item B becomes the new selection (Inspector updates to B); item A does not move. This confirms the grant-time hit-test only arms for the *currently selected* item, not whatever's under the finger.
+
 - [ ] **Step 6: Verify plain tap-elsewhere still works**
 
 With an item selected, tap a different spot with no drag (a quick tap, not a hold).
