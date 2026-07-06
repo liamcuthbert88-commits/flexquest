@@ -487,10 +487,10 @@ Expected: road/parking markings reposition to the new, larger wall boundary with
 Buy all remaining zones (largest building). Repeat the zoom-out/orbit check from Step 3.
 Expected: same — no void, no clipping, road loop fully surrounds the larger building.
 
-- [ ] **Step 6: Verify the camera ceiling**
+- [ ] **Step 6: Verify no void is visible at maximum zoom-out**
 
-Try to zoom out past the previous maximum.
-Expected: camera stops at the new ceiling; nothing unfinished or empty is visible beyond the road/ground.
+Zoom out as far as the app currently allows (note: today's actual zoom-out limit is the pre-existing `MAX_ZOOM_OFFSET`-driven one, not the new bounds-aware cap added by this feature — the new cap is a redundant future-proofing guard that doesn't bind under current zoom constants; see the comment above the cap in `CameraRig`'s `useFrame` in `components/GymFloor3D.tsx`).
+Expected: nothing unfinished or empty is visible beyond the road/ground at any point during zoom-out — this guarantee comes from `GymExterior`'s large ground plane, verified to comfortably cover the worst-case camera position at both 0 and 4 zones owned.
 
 - [ ] **Step 7: Verify the bus stop**
 
