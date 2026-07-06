@@ -1710,7 +1710,13 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
       }}
       {...panResponder.panHandlers}
     >
-      <Canvas shadows camera={{ position: [0, 6, 9], fov: CAMERA_FOV }}>
+      {/* shadows="percentage" (-> THREE.PCFShadowMap) instead of the bare
+          boolean, which r3f maps to THREE.PCFSoftShadowMap — that enum value
+          is deprecated as of three.js 0.185 and silently substituted with
+          PCFShadowMap at render time anyway, just with a console warning on
+          every frame. Requesting PCFShadowMap directly gets the same
+          resulting shadow quality without ever hitting the deprecated path. */}
+      <Canvas shadows="percentage" camera={{ position: [0, 6, 9], fov: CAMERA_FOV }}>
         <color attach="background" args={[mood.backgroundColor]} />
         <ambientLight color={mood.ambientColor} intensity={mood.ambientIntensity} />
         {/* The only shadow-casting light in the scene now (see
