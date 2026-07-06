@@ -1573,10 +1573,10 @@ function GymFloorScene({ onSelect }: GymFloorSceneProps) {
             // what used to be separate zones.
             //
             // `placingId` is captured into this local const (rather than
-            // reading `placingEquipmentIdRef.current` again below) so its
-            // type narrows from `string | null` to `string` for the calls
-            // below — TypeScript's control-flow narrowing on a mutable
-            // ref's `.current` property isn't guaranteed to persist across
+            // calling `getActivePlacementId()` again below) so its type
+            // narrows from `string | null` to `string` for the calls below —
+            // TypeScript's control-flow narrowing on a mutable ref's
+            // `.current` property isn't guaranteed to persist across
             // multiple reads the way a local const's narrowing is.
             const { width, height } = layoutSizeRef.current;
             const ground = screenToGroundPosition(
