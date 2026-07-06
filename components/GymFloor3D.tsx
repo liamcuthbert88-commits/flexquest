@@ -1137,16 +1137,6 @@ function EntranceDoor({ z }: { z: number }) {
   );
 }
 
-/** The enclosing shell itself — walls sized to `bounds` (see
- * getPlayAreaBounds), corner + mid-span pillars for structural mass, a
- * painted accent stripe doubling as branding, and a gap in the front wall
- * (always at world x=0, since z=maxZ is invariant regardless of which zones
- * are unlocked) reading as the facility's entrance. Kept deliberately low
- * (WALL_HEIGHT=4, well under the LED array at y=6) and open-topped: the
- * camera orbits from outside/above this boundary at a radius that grows in
- * step with it, and a taller or roofed shell would risk clipping the
- * camera's view at shallow polar angles, or blocking the top-down view the
- * whole game is built around. */
 type PillarSpec = { position: [number, number]; sides: Side[] };
 
 /** The enclosing shell itself — walls sized to `bounds` (see
