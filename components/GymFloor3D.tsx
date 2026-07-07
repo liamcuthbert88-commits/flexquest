@@ -115,7 +115,7 @@ const RADIUS_EASE_SPEED = 1.5;
  * overview rather than a literal bird's-eye one. */
 const MIN_POLAR = 0.2;
 const MAX_POLAR = Math.PI / 2 - 0.05;
-const NEON_COLOR = "#6B8F4E";
+const BRAND_ACCENT_COLOR = "#6B8F4E";
 const OVERHEAD_WASH_COLOR = "#f8f9fa";
 const LED_FIXTURE_COLOR = "#ffffff";
 
@@ -1247,7 +1247,7 @@ function PlacementGhost({
           rotation={[-Math.PI / 2, 0, 0]}
         >
           <planeGeometry args={[TILE_SIZE - TILE_SEAM_GAP, TILE_SIZE - TILE_SEAM_GAP]} />
-          <meshBasicMaterial color={NEON_COLOR} transparent opacity={0.4} />
+          <meshBasicMaterial color={BRAND_ACCENT_COLOR} transparent opacity={0.4} />
         </mesh>
       )}
     </>

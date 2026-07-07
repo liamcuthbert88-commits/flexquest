@@ -1,6 +1,6 @@
 import type { PlayAreaBounds } from "@/constants/zones";
 
-/** Duplicates GymFloor3D.tsx's NEON_COLOR/CARDIO_BLUE by value rather than
+/** Duplicates GymFloor3D.tsx's BRAND_ACCENT_COLOR/CARDIO_BLUE by value rather than
  * importing them — this file already did that for CARDIO_ACCENT_COLOR below;
  * kept consistent rather than mixing import and duplicate-constant patterns
  * in the same file. */
