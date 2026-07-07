@@ -12,8 +12,8 @@ export const colors = {
   textTertiary: "#5C6270",
 
   // Violet: progression / level / XP branding
-  accentPrimary: "#8B5CF6",
-  accentPrimaryMuted: "rgba(139, 92, 246, 0.16)",
+  accentPrimary: "#6B8F4E",
+  accentPrimaryMuted: "rgba(107, 143, 78, 0.16)",
 
   // Orange: the one high-energy "go do it" color, reserved for the
   // primary action so it stays the most eye-catching thing on screen.
