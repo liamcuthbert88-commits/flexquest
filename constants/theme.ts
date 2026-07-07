@@ -11,7 +11,7 @@ export const colors = {
   textSecondary: "#9096A3",
   textTertiary: "#5C6270",
 
-  // Violet: progression / level / XP branding
+  // Moss green: progression / level / XP branding
   accentPrimary: "#6B8F4E",
   accentPrimaryMuted: "rgba(107, 143, 78, 0.16)",
 
