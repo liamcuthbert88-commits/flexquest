@@ -131,20 +131,26 @@ const MAX_ZOOM_OFFSET = 6;
  * visually dominant of the two. */
 const MAX_CAMERA_HEIGHT = 5.5;
 
-/** Distance (world units) from a wall plane within which it starts fading —
- * lets the camera get close to inspect equipment near a wall without that
- * wall blocking the view, while staying fully opaque (and visible as an
- * actual boundary) everywhere else. Only the wall(s) the camera is
- * currently near fade; the rest of the shell stays solid. */
-const WALL_FADE_DISTANCE = 3;
-/** Floor on faded opacity — kept above 0 so a near wall still reads as
- * "see-through" (translucent boundary) rather than vanishing outright. */
-const MIN_WALL_OPACITY = 0.12;
-/** How far past a wall's own span (along the wall) the camera can still be
- * and count as "near" it — covers the corner case, where the camera is close
- * to a wall just past where the perpendicular wall begins. */
-const WALL_FADE_LATERAL_MARGIN = 1.5;
-const WALL_FADE_EASE_RATE = 6;
+/** The four sides of the rectangular wall shell — GymWalls fades/hides each
+ * independently based on which side the camera currently occupies, rather
+ * than the whole shell fading in lockstep off literal camera-to-wall
+ * distance (the old approach: it left near-side walls opaque and blocking
+ * the view unless the camera happened to be within a few units of that
+ * exact wall, even when clearly orbiting from outside looking through it). */
+const SIDES = ["front", "back", "left", "right"] as const;
+type Side = (typeof SIDES)[number];
+
+/** Ease rate for the opacity fade that precedes hiding a near-side wall —
+ * deliberately faster than a slow ambient fade, so it reads as the wall
+ * "whooshing away" rather than lazily dissolving. */
+const HIDE_EASE_RATE = 15;
+/** Opacity floor below which a near-side wall's group is actually hidden
+ * (`visible = false`) — waiting for the fade to mostly finish first avoids
+ * a pop where a still-partly-opaque wall vanishes abruptly. Hiding (not
+ * just fading to a low value) matters because material opacity has no
+ * effect on shadow-casting: a wall left merely translucent would still
+ * cast a shadow with no visible caster, which reads as a glitch. */
+const HIDE_OPACITY_THRESHOLD = 0.05;
 const PINCH_ZOOM_SPEED = 0.02;
 /** 1:1 — twisting two fingers 90° rotates the camera 90°, the natural direct-
  * manipulation feel for a twist gesture (matching e.g. iOS's photo pinch-
@@ -956,9 +962,10 @@ function WallPanel({
    * accent stripe overlaid on this panel — different per wall since each
    * faces a different direction. */
   accentOffset: [number, number, number];
-  /** Shared, not per-panel — GymWalls fades every panel's opacity in lockstep
-   * off one useFrame by mutating these materials directly, so all panels
-   * must point at the same instances rather than each owning their own. */
+  /** Shared per side, not globally — GymWalls fades/hides each side's shell
+   * independently by mutating that side's own material instances directly,
+   * so every panel belonging to the same side must point at the same
+   * instances rather than each owning their own. */
   wallMaterial: MeshStandardMaterial;
   accentMaterial: MeshStandardMaterial;
 }) {
@@ -1130,6 +1137,8 @@ function EntranceDoor({ z }: { z: number }) {
   );
 }
 
+type PillarSpec = { position: [number, number]; sides: Side[] };
+
 /** The enclosing shell itself — walls sized to `bounds` (see
  * getPlayAreaBounds), corner + mid-span pillars for structural mass, a
  * painted accent stripe doubling as branding, and a gap in the front wall
@@ -1139,7 +1148,13 @@ function EntranceDoor({ z }: { z: number }) {
  * camera orbits from outside/above this boundary at a radius that grows in
  * step with it, and a taller or roofed shell would risk clipping the
  * camera's view at shallow polar angles, or blocking the top-down view the
- * whole game is built around. */
+ * whole game is built around.
+ *
+ * Each of the four sides fades and fully hides independently (see the
+ * useFrame below) whenever the camera currently sits on that side — the
+ * wall(s) between the camera and the interior disappear instead of merely
+ * fading, so equipment on the far side of the room is never occluded no
+ * matter how the camera is oriented. */
 function GymWalls({ bounds }: { bounds: PlayAreaBounds }) {
   const { minX, maxX, minZ, maxZ } = bounds;
   const width = maxX - minX;
@@ -1155,99 +1170,169 @@ function GymWalls({ bounds }: { bounds: PlayAreaBounds }) {
   const frontLeftCenterX = (minX + entranceLeftX) / 2;
   const frontRightCenterX = (entranceRightX + maxX) / 2;
 
-  const pillarPositions: [number, number][] = [
-    [minX, minZ],
-    [maxX, minZ],
-    [minX, maxZ],
-    [maxX, maxZ],
-    [entranceLeftX, maxZ],
-    [entranceRightX, maxZ],
-    [minX, centerZ],
-    [maxX, centerZ],
+  // Entrance-flanking and mid-span pillars belong to exactly one side each
+  // — rendered inside that side's group below, so they hide/show with it
+  // automatically with no separate visibility logic needed.
+  const singleSidePillars: PillarSpec[] = [
+    { position: [entranceLeftX, maxZ], sides: ["front"] },
+    { position: [entranceRightX, maxZ], sides: ["front"] },
+    { position: [minX, centerZ], sides: ["left"] },
+    { position: [maxX, centerZ], sides: ["right"] },
+  ];
+  // True corner pillars belong to two sides — rendered outside any single
+  // side's group, with their own dual-side visibility rule in useFrame
+  // below (hidden only once BOTH adjacent sides are hidden).
+  const cornerPillars: PillarSpec[] = [
+    { position: [minX, minZ], sides: ["back", "left"] },
+    { position: [maxX, minZ], sides: ["back", "right"] },
+    { position: [minX, maxZ], sides: ["front", "left"] },
+    { position: [maxX, maxZ], sides: ["front", "right"] },
   ];
 
-  // Shared across every panel/pillar below, not one material per mesh — lets
-  // a single useFrame fade the whole shell in lockstep by mutating .opacity
-  // on just these three instances instead of re-rendering N meshes.
-  const wallMaterial = useMemo(
-    () => new MeshStandardMaterial({ color: WALL_COLOR, roughness: 0.85, metalness: 0.05, transparent: true }),
-    []
-  );
-  const accentMaterial = useMemo(
-    () => new MeshStandardMaterial({ color: NEON_COLOR, roughness: 0.6, metalness: 0.1, transparent: true }),
-    []
-  );
+  // One material pair per side (not one shared globally) — lets each side
+  // fade/hide independently. Every panel belonging to the same side still
+  // shares that side's one material instance, so mutating it once in
+  // useFrame updates every panel on that side in lockstep.
+  const materials = useMemo(() => {
+    const result = {} as Record<Side, { wall: MeshStandardMaterial; accent: MeshStandardMaterial }>;
+    for (const side of SIDES) {
+      result[side] = {
+        wall: new MeshStandardMaterial({ color: WALL_COLOR, roughness: 0.85, metalness: 0.05, transparent: true }),
+        accent: new MeshStandardMaterial({ color: NEON_COLOR, roughness: 0.6, metalness: 0.1, transparent: true }),
+      };
+    }
+    return result;
+  }, []);
   const pillarMaterial = useMemo(
     () => new MeshStandardMaterial({ color: PILLAR_COLOR, roughness: 0.7, metalness: 0.15, transparent: true }),
     []
   );
 
-  const wallOpacityRef = useRef(1);
+  const opacityRef = useRef<Record<Side, number>>({ front: 1, back: 1, left: 1, right: 1 });
+  const groupRefs = useRef<Record<Side, Group | null>>({ front: null, back: null, left: null, right: null });
+  const cornerPillarRefs = useRef<(Object3D | null)[]>([]);
 
-  /** Fades the entire shell uniformly (not per-individual-wall) toward
-   * MIN_WALL_OPACITY whenever the camera is within WALL_FADE_DISTANCE of any
-   * one wall plane — moving in close to inspect equipment near a wall
-   * shouldn't have that wall block the view, but the shell should read as
-   * fully solid the rest of the time. "Near a wall" is plane-distance
-   * clamped to that wall's own span (plus a small corner margin), so being
-   * close to one wall doesn't also fade the unrelated far side. */
+  /** Per side, hides that side's wall group whenever the camera is
+   * currently on that side (i.e., that wall sits between the camera and
+   * the room's interior) — fully culled once faded out, not just
+   * translucent, so it neither renders nor casts a shadow while hidden.
+   * The opposite side(s) always stay solid, so the shell still reads as
+   * an enclosed room from any angle. The brief opacity fade
+   * (HIDE_EASE_RATE) runs before the group is actually hidden/shown, so
+   * the transition doesn't pop. */
   useFrame(({ camera }, delta) => {
-    const distances: number[] = [];
-    if (camera.position.x >= minX - WALL_FADE_LATERAL_MARGIN && camera.position.x <= maxX + WALL_FADE_LATERAL_MARGIN) {
-      distances.push(Math.abs(camera.position.z - minZ), Math.abs(camera.position.z - maxZ));
-    }
-    if (camera.position.z >= minZ - WALL_FADE_LATERAL_MARGIN && camera.position.z <= maxZ + WALL_FADE_LATERAL_MARGIN) {
-      distances.push(Math.abs(camera.position.x - minX), Math.abs(camera.position.x - maxX));
-    }
-    const nearestWallDistance = distances.length > 0 ? Math.min(...distances) : Infinity;
-    const targetOpacity = clamp(nearestWallDistance / WALL_FADE_DISTANCE, MIN_WALL_OPACITY, 1);
+    const isNear: Record<Side, boolean> = {
+      front: camera.position.z > maxZ,
+      back: camera.position.z < minZ,
+      left: camera.position.x < minX,
+      right: camera.position.x > maxX,
+    };
 
-    wallOpacityRef.current += (targetOpacity - wallOpacityRef.current) * Math.min(1, delta * WALL_FADE_EASE_RATE);
-    wallMaterial.opacity = wallOpacityRef.current;
-    accentMaterial.opacity = wallOpacityRef.current;
-    pillarMaterial.opacity = wallOpacityRef.current;
+    for (const side of SIDES) {
+      const target = isNear[side] ? 0 : 1;
+      opacityRef.current[side] += (target - opacityRef.current[side]) * Math.min(1, delta * HIDE_EASE_RATE);
+      materials[side].wall.opacity = opacityRef.current[side];
+      materials[side].accent.opacity = opacityRef.current[side];
+
+      const group = groupRefs.current[side];
+      if (group) {
+        if (isNear[side] && opacityRef.current[side] < HIDE_OPACITY_THRESHOLD) {
+          group.visible = false;
+        } else if (!isNear[side]) {
+          group.visible = true;
+        }
+      }
+    }
+
+    cornerPillars.forEach((pillar, i) => {
+      const mesh = cornerPillarRefs.current[i];
+      if (!mesh) return;
+      const [sideA, sideB] = pillar.sides;
+      const bothHidden =
+        opacityRef.current[sideA] < HIDE_OPACITY_THRESHOLD && opacityRef.current[sideB] < HIDE_OPACITY_THRESHOLD;
+      mesh.visible = !bothHidden;
+    });
   });
 
   return (
     <group>
-      <WallPanel
-        position={[(minX + maxX) / 2, wallY, minZ]}
-        size={[width + WALL_THICKNESS, WALL_HEIGHT, WALL_THICKNESS]}
-        accentOffset={[0, 0, halfThickness]}
-        wallMaterial={wallMaterial}
-        accentMaterial={accentMaterial}
-      />
-      <WallPanel
-        position={[frontLeftCenterX, wallY, maxZ]}
-        size={[frontLeftWidth, WALL_HEIGHT, WALL_THICKNESS]}
-        accentOffset={[0, 0, -halfThickness]}
-        wallMaterial={wallMaterial}
-        accentMaterial={accentMaterial}
-      />
-      <WindowedWallSegment
-        centerX={frontRightCenterX}
-        width={frontRightWidth}
-        z={maxZ}
-        wallMaterial={wallMaterial}
-      />
-      <EntranceDoor z={maxZ} />
-      <WallPanel
-        position={[minX, wallY, centerZ]}
-        size={[WALL_THICKNESS, WALL_HEIGHT, depth + WALL_THICKNESS]}
-        accentOffset={[halfThickness, 0, 0]}
-        wallMaterial={wallMaterial}
-        accentMaterial={accentMaterial}
-      />
-      <WallPanel
-        position={[maxX, wallY, centerZ]}
-        size={[WALL_THICKNESS, WALL_HEIGHT, depth + WALL_THICKNESS]}
-        accentOffset={[-halfThickness, 0, 0]}
-        wallMaterial={wallMaterial}
-        accentMaterial={accentMaterial}
-      />
+      <group ref={(el) => { groupRefs.current.back = el; }}>
+        <WallPanel
+          position={[(minX + maxX) / 2, wallY, minZ]}
+          size={[width + WALL_THICKNESS, WALL_HEIGHT, WALL_THICKNESS]}
+          accentOffset={[0, 0, halfThickness]}
+          wallMaterial={materials.back.wall}
+          accentMaterial={materials.back.accent}
+        />
+      </group>
 
-      {pillarPositions.map(([x, z], i) => (
-        <mesh key={i} position={[x, wallY, z]} castShadow material={pillarMaterial}>
+      <group ref={(el) => { groupRefs.current.front = el; }}>
+        <WallPanel
+          position={[frontLeftCenterX, wallY, maxZ]}
+          size={[frontLeftWidth, WALL_HEIGHT, WALL_THICKNESS]}
+          accentOffset={[0, 0, -halfThickness]}
+          wallMaterial={materials.front.wall}
+          accentMaterial={materials.front.accent}
+        />
+        <WindowedWallSegment
+          centerX={frontRightCenterX}
+          width={frontRightWidth}
+          z={maxZ}
+          wallMaterial={materials.front.wall}
+        />
+        {singleSidePillars
+          .filter((p) => p.sides[0] === "front")
+          .map((p, i) => (
+            <mesh key={i} position={[p.position[0], wallY, p.position[1]]} castShadow material={pillarMaterial}>
+              <boxGeometry args={[PILLAR_SIZE, WALL_HEIGHT + 0.3, PILLAR_SIZE]} />
+            </mesh>
+          ))}
+      </group>
+
+      <EntranceDoor z={maxZ} />
+
+      <group ref={(el) => { groupRefs.current.left = el; }}>
+        <WallPanel
+          position={[minX, wallY, centerZ]}
+          size={[WALL_THICKNESS, WALL_HEIGHT, depth + WALL_THICKNESS]}
+          accentOffset={[halfThickness, 0, 0]}
+          wallMaterial={materials.left.wall}
+          accentMaterial={materials.left.accent}
+        />
+        {singleSidePillars
+          .filter((p) => p.sides[0] === "left")
+          .map((p, i) => (
+            <mesh key={i} position={[p.position[0], wallY, p.position[1]]} castShadow material={pillarMaterial}>
+              <boxGeometry args={[PILLAR_SIZE, WALL_HEIGHT + 0.3, PILLAR_SIZE]} />
+            </mesh>
+          ))}
+      </group>
+
+      <group ref={(el) => { groupRefs.current.right = el; }}>
+        <WallPanel
+          position={[maxX, wallY, centerZ]}
+          size={[WALL_THICKNESS, WALL_HEIGHT, depth + WALL_THICKNESS]}
+          accentOffset={[-halfThickness, 0, 0]}
+          wallMaterial={materials.right.wall}
+          accentMaterial={materials.right.accent}
+        />
+        {singleSidePillars
+          .filter((p) => p.sides[0] === "right")
+          .map((p, i) => (
+            <mesh key={i} position={[p.position[0], wallY, p.position[1]]} castShadow material={pillarMaterial}>
+              <boxGeometry args={[PILLAR_SIZE, WALL_HEIGHT + 0.3, PILLAR_SIZE]} />
+            </mesh>
+          ))}
+      </group>
+
+      {cornerPillars.map((pillar, i) => (
+        <mesh
+          key={i}
+          ref={(el) => { cornerPillarRefs.current[i] = el; }}
+          position={[pillar.position[0], wallY, pillar.position[1]]}
+          castShadow
+          material={pillarMaterial}
+        >
           <boxGeometry args={[PILLAR_SIZE, WALL_HEIGHT + 0.3, PILLAR_SIZE]} />
         </mesh>
       ))}
