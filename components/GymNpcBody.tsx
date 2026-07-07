@@ -62,7 +62,7 @@ const HIP_PIVOT_X = WAIST_WIDTH / 2 - 0.03;
  * ease-back use the same rate, so a walk-to-stop transition doesn't pop. */
 function easeRotationX(ref: MutableRefObject<Group | null>, target: number, delta: number) {
   if (!ref.current) return;
-  ref.current.rotation.x += (target - ref.current.rotation.x) * Math.min(1, delta * JOINT_EASE_RATE);
+  ref.current.rotation.x += (target - ref.current.rotation.x) * (1 - Math.exp(-JOINT_EASE_RATE * delta));
 }
 
 type NpcBodyProps = {
