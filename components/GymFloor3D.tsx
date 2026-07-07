@@ -115,7 +115,7 @@ const RADIUS_EASE_SPEED = 1.5;
  * overview rather than a literal bird's-eye one. */
 const MIN_POLAR = 0.2;
 const MAX_POLAR = Math.PI / 2 - 0.05;
-const NEON_COLOR = "#8B5CF6";
+const NEON_COLOR = "#6B8F4E";
 const OVERHEAD_WASH_COLOR = "#f8f9fa";
 const LED_FIXTURE_COLOR = "#ffffff";
 
@@ -899,43 +899,6 @@ function CeilingVents() {
   );
 }
 
-/** Static neon tube glow tracing the floor's perimeter — inset from the
- * enclosing walls (rather than sitting flush/coincident with them) so it
- * reads as trim molding at the wall's base, not a shape colliding with it.
- * Its bounds always match GymWalls' current bounds, so the trim keeps
- * framing the room correctly as the shell grows with unlocked zones. */
-function NeonPerimeter({ bounds }: { bounds: PlayAreaBounds }) {
-  const innerMinX = bounds.minX + WALL_INSET_FROM_NEON;
-  const innerMaxX = bounds.maxX - WALL_INSET_FROM_NEON;
-  const innerMinZ = bounds.minZ + WALL_INSET_FROM_NEON;
-  const innerMaxZ = bounds.maxZ - WALL_INSET_FROM_NEON;
-  const width = innerMaxX - innerMinX;
-  const depth = innerMaxZ - innerMinZ;
-  const centerX = (innerMinX + innerMaxX) / 2;
-  const centerZ = (innerMinZ + innerMaxZ) / 2;
-
-  const strips: { position: [number, number, number]; size: [number, number, number] }[] = [
-    { position: [centerX, 0.05, innerMinZ], size: [width, 0.06, 0.12] },
-    { position: [centerX, 0.05, innerMaxZ], size: [width, 0.06, 0.12] },
-    { position: [innerMinX, 0.05, centerZ], size: [0.12, 0.06, depth] },
-    { position: [innerMaxX, 0.05, centerZ], size: [0.12, 0.06, depth] },
-  ];
-
-  return (
-    <>
-      {strips.map((strip, i) => (
-        <mesh key={i} position={strip.position}>
-          <boxGeometry args={strip.size} />
-          <meshStandardMaterial color={NEON_COLOR} emissive={NEON_COLOR} emissiveIntensity={1.5} />
-        </mesh>
-      ))}
-      {strips.map((strip, i) => (
-        <GlowLayer key={`glow-${i}`} position={strip.position} size={strip.size} color={NEON_COLOR} />
-      ))}
-    </>
-  );
-}
-
 /** The enclosing shell itself — 4 walls sized to `bounds` (see
  * getPlayAreaBounds) plus corner pillars for structural mass. Kept
  * deliberately low (WALL_HEIGHT=4, well under the LED array at y=6) and
@@ -946,44 +909,19 @@ function NeonPerimeter({ bounds }: { bounds: PlayAreaBounds }) {
 function WallPanel({
   position,
   size,
-  accentOffset,
   wallMaterial,
-  accentMaterial,
 }: {
   position: [number, number, number];
   size: [number, number, number];
-  /** Offset (along the wall's own normal, toward the room) for the painted
-   * accent stripe overlaid on this panel — different per wall since each
-   * faces a different direction. */
-  accentOffset: [number, number, number];
   /** Shared, not per-panel — GymWalls fades every panel's opacity in lockstep
-   * off one useFrame by mutating these materials directly, so all panels
-   * must point at the same instances rather than each owning their own. */
+   * off one useFrame by mutating this material directly, so all panels must
+   * point at the same instance rather than each owning their own. */
   wallMaterial: MeshStandardMaterial;
-  accentMaterial: MeshStandardMaterial;
 }) {
-  const accentPosition: [number, number, number] = [
-    position[0] + accentOffset[0],
-    ACCENT_STRIPE_Y,
-    position[2] + accentOffset[2],
-  ];
-  const accentSize: [number, number, number] =
-    size[0] > size[2] ? [size[0] - PILLAR_SIZE, ACCENT_STRIPE_HEIGHT, 0.02] : [0.02, ACCENT_STRIPE_HEIGHT, size[2] - PILLAR_SIZE];
-
   return (
-    <>
-      <mesh position={position} castShadow receiveShadow material={wallMaterial}>
-        <boxGeometry args={size} />
-      </mesh>
-      {/* Painted brand accent stripe — reuses the same signature violet as
-       * the neon floor trim so the branding reads as one consistent
-       * identity, rather than introducing a second competing color. Plain
-       * matte paint, not emissive: this pass is about environment detail,
-       * not new rendering techniques, so it doesn't need its own GlowLayer. */}
-      <mesh position={accentPosition} material={accentMaterial}>
-        <boxGeometry args={accentSize} />
-      </mesh>
-    </>
+    <mesh position={position} castShadow receiveShadow material={wallMaterial}>
+      <boxGeometry args={size} />
+    </mesh>
   );
 }
 
@@ -1146,7 +1084,6 @@ function GymWalls({ bounds }: { bounds: PlayAreaBounds }) {
   const depth = maxZ - minZ;
   const centerZ = (minZ + maxZ) / 2;
   const wallY = WALL_HEIGHT / 2;
-  const halfThickness = WALL_THICKNESS / 2 + 0.02;
 
   const entranceLeftX = -ENTRANCE_GAP_WIDTH / 2;
   const entranceRightX = ENTRANCE_GAP_WIDTH / 2;
@@ -1171,10 +1108,6 @@ function GymWalls({ bounds }: { bounds: PlayAreaBounds }) {
   // on just these three instances instead of re-rendering N meshes.
   const wallMaterial = useMemo(
     () => new MeshStandardMaterial({ color: WALL_COLOR, roughness: 0.85, metalness: 0.05, transparent: true }),
-    []
-  );
-  const accentMaterial = useMemo(
-    () => new MeshStandardMaterial({ color: NEON_COLOR, roughness: 0.6, metalness: 0.1, transparent: true }),
     []
   );
   const pillarMaterial = useMemo(
@@ -1204,7 +1137,6 @@ function GymWalls({ bounds }: { bounds: PlayAreaBounds }) {
 
     wallOpacityRef.current += (targetOpacity - wallOpacityRef.current) * Math.min(1, delta * WALL_FADE_EASE_RATE);
     wallMaterial.opacity = wallOpacityRef.current;
-    accentMaterial.opacity = wallOpacityRef.current;
     pillarMaterial.opacity = wallOpacityRef.current;
   });
 
@@ -1213,16 +1145,12 @@ function GymWalls({ bounds }: { bounds: PlayAreaBounds }) {
       <WallPanel
         position={[(minX + maxX) / 2, wallY, minZ]}
         size={[width + WALL_THICKNESS, WALL_HEIGHT, WALL_THICKNESS]}
-        accentOffset={[0, 0, halfThickness]}
         wallMaterial={wallMaterial}
-        accentMaterial={accentMaterial}
       />
       <WallPanel
         position={[frontLeftCenterX, wallY, maxZ]}
         size={[frontLeftWidth, WALL_HEIGHT, WALL_THICKNESS]}
-        accentOffset={[0, 0, -halfThickness]}
         wallMaterial={wallMaterial}
-        accentMaterial={accentMaterial}
       />
       <WindowedWallSegment
         centerX={frontRightCenterX}
@@ -1234,16 +1162,12 @@ function GymWalls({ bounds }: { bounds: PlayAreaBounds }) {
       <WallPanel
         position={[minX, wallY, centerZ]}
         size={[WALL_THICKNESS, WALL_HEIGHT, depth + WALL_THICKNESS]}
-        accentOffset={[halfThickness, 0, 0]}
         wallMaterial={wallMaterial}
-        accentMaterial={accentMaterial}
       />
       <WallPanel
         position={[maxX, wallY, centerZ]}
         size={[WALL_THICKNESS, WALL_HEIGHT, depth + WALL_THICKNESS]}
-        accentOffset={[-halfThickness, 0, 0]}
         wallMaterial={wallMaterial}
-        accentMaterial={accentMaterial}
       />
 
       {pillarPositions.map(([x, z], i) => (
@@ -1809,7 +1733,6 @@ function GymFloorScene({ onSelect, placingEquipmentId, onPlacementSettled }: Gym
         <CeilingBeams />
         <CeilingFans />
         <CeilingVents />
-        <NeonPerimeter bounds={playAreaBounds} />
         <SmoothieBar />
 
         {ownedEquipment.map((item) => {
