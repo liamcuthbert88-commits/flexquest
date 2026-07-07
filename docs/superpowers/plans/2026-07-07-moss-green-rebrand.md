@@ -153,11 +153,11 @@ to:
 const NEON_COLOR = "#6B8F4E";
 ```
 
-This constant is kept — its one remaining use after this task (the drag-highlight-tile in `PlacementGhost`, around line 1414) is a real interactive affordance, not decorative neon trim, so it stays and simply picks up the new color.
+This constant is kept — its one remaining use after this task (the drag-highlight-tile in `PlacementGhost`, around line 1329) is a real interactive affordance, not decorative neon trim, so it stays and simply picks up the new color.
 
 - [ ] **Step 2: Remove the `NeonPerimeter` function entirely**
 
-Delete the whole function (currently lines 908-943, including its doc comment):
+Delete the whole function (currently lines 902-937, including its doc comment):
 
 ```ts
 /** Static neon tube glow tracing the floor's perimeter — inset from the
@@ -200,7 +200,7 @@ function NeonPerimeter({ bounds }: { bounds: PlayAreaBounds }) {
 
 - [ ] **Step 3: Remove `<NeonPerimeter>`'s mount point**
 
-Delete this line from the scene's JSX (currently in `GymFloorScene`'s returned `<Canvas>`, alongside the other environment components):
+Delete this line from the scene's JSX (currently line 1812, in `GymFloorScene`'s returned `<Canvas>`, alongside the other environment components):
 
 ```tsx
         <NeonPerimeter bounds={playAreaBounds} />
@@ -210,7 +210,9 @@ Leave every sibling line around it (e.g. `<GymWalls bounds={playAreaBounds} />`,
 
 - [ ] **Step 4: Remove `WallPanel`'s accent stripe entirely**
 
-Change (currently lines 952-995):
+**Correction (this replaces an earlier version of this step that assumed a different, not-yet-merged `GymWalls` rewrite — see the note at the end of this task):**
+
+Change (currently lines 946-995):
 
 ```ts
 function WallPanel({
@@ -226,10 +228,9 @@ function WallPanel({
    * accent stripe overlaid on this panel — different per wall since each
    * faces a different direction. */
   accentOffset: [number, number, number];
-  /** Shared per side, not globally — GymWalls fades/hides each side's shell
-   * independently by mutating that side's own material instances directly,
-   * so every panel belonging to the same side must point at the same
-   * instances rather than each owning their own. */
+  /** Shared, not per-panel — GymWalls fades every panel's opacity in lockstep
+   * off one useFrame by mutating these materials directly, so all panels
+   * must point at the same instances rather than each owning their own. */
   wallMaterial: MeshStandardMaterial;
   accentMaterial: MeshStandardMaterial;
 }) {
@@ -269,10 +270,9 @@ function WallPanel({
 }: {
   position: [number, number, number];
   size: [number, number, number];
-  /** Shared per side, not globally — GymWalls fades/hides each side's shell
-   * independently by mutating that side's own material instance directly,
-   * so every panel belonging to the same side must point at the same
-   * instance rather than each owning their own. */
+  /** Shared, not per-panel — GymWalls fades every panel's opacity in lockstep
+   * off one useFrame by mutating this material directly, so all panels must
+   * point at the same instance rather than each owning their own. */
   wallMaterial: MeshStandardMaterial;
 }) {
   return (
@@ -283,137 +283,138 @@ function WallPanel({
 }
 ```
 
-- [ ] **Step 5: Simplify `GymWalls`' per-side materials — drop `.accent`**
+- [ ] **Step 5: Remove the `accentMaterial` useMemo in `GymWalls`**
 
-Change (currently lines 1196-1205):
+Change (currently lines 1172-1183):
 
 ```ts
-  const materials = useMemo(() => {
-    const result = {} as Record<Side, { wall: MeshStandardMaterial; accent: MeshStandardMaterial }>;
-    for (const side of SIDES) {
-      result[side] = {
-        wall: new MeshStandardMaterial({ color: WALL_COLOR, roughness: 0.85, metalness: 0.05, transparent: true }),
-        accent: new MeshStandardMaterial({ color: NEON_COLOR, roughness: 0.6, metalness: 0.1, transparent: true }),
-      };
-    }
-    return result;
-  }, []);
+  const wallMaterial = useMemo(
+    () => new MeshStandardMaterial({ color: WALL_COLOR, roughness: 0.85, metalness: 0.05, transparent: true }),
+    []
+  );
+  const accentMaterial = useMemo(
+    () => new MeshStandardMaterial({ color: NEON_COLOR, roughness: 0.6, metalness: 0.1, transparent: true }),
+    []
+  );
+  const pillarMaterial = useMemo(
+    () => new MeshStandardMaterial({ color: PILLAR_COLOR, roughness: 0.7, metalness: 0.15, transparent: true }),
+    []
+  );
 ```
 
 to:
 
 ```ts
-  const materials = useMemo(() => {
-    const result = {} as Record<Side, { wall: MeshStandardMaterial }>;
-    for (const side of SIDES) {
-      result[side] = {
-        wall: new MeshStandardMaterial({ color: WALL_COLOR, roughness: 0.85, metalness: 0.05, transparent: true }),
-      };
-    }
-    return result;
-  }, []);
+  const wallMaterial = useMemo(
+    () => new MeshStandardMaterial({ color: WALL_COLOR, roughness: 0.85, metalness: 0.05, transparent: true }),
+    []
+  );
+  const pillarMaterial = useMemo(
+    () => new MeshStandardMaterial({ color: PILLAR_COLOR, roughness: 0.7, metalness: 0.15, transparent: true }),
+    []
+  );
 ```
 
 - [ ] **Step 6: Drop the accent-opacity assignment in `useFrame`**
 
-Change (currently lines 1231-1235, inside the `for (const side of SIDES)` loop):
+Change (currently lines 1205-1208, the last four lines of the `useFrame` callback):
 
 ```ts
-    for (const side of SIDES) {
-      const target = isNear[side] ? 0 : 1;
-      opacityRef.current[side] += (target - opacityRef.current[side]) * Math.min(1, delta * HIDE_EASE_RATE);
-      materials[side].wall.opacity = opacityRef.current[side];
-      materials[side].accent.opacity = opacityRef.current[side];
+    wallOpacityRef.current += (targetOpacity - wallOpacityRef.current) * Math.min(1, delta * WALL_FADE_EASE_RATE);
+    wallMaterial.opacity = wallOpacityRef.current;
+    accentMaterial.opacity = wallOpacityRef.current;
+    pillarMaterial.opacity = wallOpacityRef.current;
 ```
 
 to:
 
 ```ts
-    for (const side of SIDES) {
-      const target = isNear[side] ? 0 : 1;
-      opacityRef.current[side] += (target - opacityRef.current[side]) * Math.min(1, delta * HIDE_EASE_RATE);
-      materials[side].wall.opacity = opacityRef.current[side];
+    wallOpacityRef.current += (targetOpacity - wallOpacityRef.current) * Math.min(1, delta * WALL_FADE_EASE_RATE);
+    wallMaterial.opacity = wallOpacityRef.current;
+    pillarMaterial.opacity = wallOpacityRef.current;
 ```
 
-(The rest of that loop body — the `group.visible` hide/show logic immediately below — is unchanged.)
+(Everything above these lines in the same `useFrame` — the camera-distance calculation, `targetOpacity`, the easing — is unrelated to the accent stripe and stays exactly as-is. This task does not touch the wall-fade mechanism itself, only removes the accent material's participation in it.)
 
 - [ ] **Step 7: Drop `accentOffset`/`accentMaterial` from all 4 `<WallPanel>` call sites**
 
-Change each of the 4 calls (currently at the `back`, `front`, `left`, `right` groups):
+Change each of the 4 calls (currently lines 1213-1247, inside `GymWalls`' returned JSX):
 
 ```tsx
-        <WallPanel
-          position={[(minX + maxX) / 2, wallY, minZ]}
-          size={[width + WALL_THICKNESS, WALL_HEIGHT, WALL_THICKNESS]}
-          accentOffset={[0, 0, halfThickness]}
-          wallMaterial={materials.back.wall}
-          accentMaterial={materials.back.accent}
-        />
+      <WallPanel
+        position={[(minX + maxX) / 2, wallY, minZ]}
+        size={[width + WALL_THICKNESS, WALL_HEIGHT, WALL_THICKNESS]}
+        accentOffset={[0, 0, halfThickness]}
+        wallMaterial={wallMaterial}
+        accentMaterial={accentMaterial}
+      />
 ```
 
 ```tsx
-        <WallPanel
-          position={[frontLeftCenterX, wallY, maxZ]}
-          size={[frontLeftWidth, WALL_HEIGHT, WALL_THICKNESS]}
-          accentOffset={[0, 0, -halfThickness]}
-          wallMaterial={materials.front.wall}
-          accentMaterial={materials.front.accent}
-        />
+      <WallPanel
+        position={[frontLeftCenterX, wallY, maxZ]}
+        size={[frontLeftWidth, WALL_HEIGHT, WALL_THICKNESS]}
+        accentOffset={[0, 0, -halfThickness]}
+        wallMaterial={wallMaterial}
+        accentMaterial={accentMaterial}
+      />
 ```
 
 ```tsx
-        <WallPanel
-          position={[minX, wallY, centerZ]}
-          size={[WALL_THICKNESS, WALL_HEIGHT, depth + WALL_THICKNESS]}
-          accentOffset={[halfThickness, 0, 0]}
-          wallMaterial={materials.left.wall}
-          accentMaterial={materials.left.accent}
-        />
+      <WallPanel
+        position={[minX, wallY, centerZ]}
+        size={[WALL_THICKNESS, WALL_HEIGHT, depth + WALL_THICKNESS]}
+        accentOffset={[halfThickness, 0, 0]}
+        wallMaterial={wallMaterial}
+        accentMaterial={accentMaterial}
+      />
 ```
 
 ```tsx
-        <WallPanel
-          position={[maxX, wallY, centerZ]}
-          size={[WALL_THICKNESS, WALL_HEIGHT, depth + WALL_THICKNESS]}
-          accentOffset={[-halfThickness, 0, 0]}
-          wallMaterial={materials.right.wall}
-          accentMaterial={materials.right.accent}
-        />
+      <WallPanel
+        position={[maxX, wallY, centerZ]}
+        size={[WALL_THICKNESS, WALL_HEIGHT, depth + WALL_THICKNESS]}
+        accentOffset={[-halfThickness, 0, 0]}
+        wallMaterial={wallMaterial}
+        accentMaterial={accentMaterial}
+      />
 ```
 
 to (each drops only its `accentOffset` and `accentMaterial` lines — `position`, `size`, and `wallMaterial` are unchanged on all 4):
 
 ```tsx
-        <WallPanel
-          position={[(minX + maxX) / 2, wallY, minZ]}
-          size={[width + WALL_THICKNESS, WALL_HEIGHT, WALL_THICKNESS]}
-          wallMaterial={materials.back.wall}
-        />
+      <WallPanel
+        position={[(minX + maxX) / 2, wallY, minZ]}
+        size={[width + WALL_THICKNESS, WALL_HEIGHT, WALL_THICKNESS]}
+        wallMaterial={wallMaterial}
+      />
 ```
 
 ```tsx
-        <WallPanel
-          position={[frontLeftCenterX, wallY, maxZ]}
-          size={[frontLeftWidth, WALL_HEIGHT, WALL_THICKNESS]}
-          wallMaterial={materials.front.wall}
-        />
+      <WallPanel
+        position={[frontLeftCenterX, wallY, maxZ]}
+        size={[frontLeftWidth, WALL_HEIGHT, WALL_THICKNESS]}
+        wallMaterial={wallMaterial}
+      />
 ```
 
 ```tsx
-        <WallPanel
-          position={[minX, wallY, centerZ]}
-          size={[WALL_THICKNESS, WALL_HEIGHT, depth + WALL_THICKNESS]}
-          wallMaterial={materials.left.wall}
-        />
+      <WallPanel
+        position={[minX, wallY, centerZ]}
+        size={[WALL_THICKNESS, WALL_HEIGHT, depth + WALL_THICKNESS]}
+        wallMaterial={wallMaterial}
+      />
 ```
 
 ```tsx
-        <WallPanel
-          position={[maxX, wallY, centerZ]}
-          size={[WALL_THICKNESS, WALL_HEIGHT, depth + WALL_THICKNESS]}
-          wallMaterial={materials.right.wall}
-        />
+      <WallPanel
+        position={[maxX, wallY, centerZ]}
+        size={[WALL_THICKNESS, WALL_HEIGHT, depth + WALL_THICKNESS]}
+        wallMaterial={wallMaterial}
+      />
 ```
+
+**Why Steps 4-7 were corrected:** this plan was originally written while a separate, not-yet-merged branch (`feature/wall-occlusion-hide`, still an open PR) was checked out — that branch rewrote `GymWalls` into a per-side (`SIDES`/`Record<Side, ...>`) structure. This plan's implementation branch was forked from `master`, which doesn't have that rewrite yet, so the original Steps 4-7 didn't match the actual file and were caught by the implementer refusing to guess rather than silently applying a mismatched edit. The corrected steps above target `GymWalls`' actual current (single shared `wallMaterial`/`accentMaterial`/`pillarMaterial`, uniform distance-based fade) structure. Whichever of these two branches merges second will need to reconcile `GymWalls` again at that point — expected, not a new problem introduced here.
 
 - [ ] **Step 8: Remove the now-dead `halfThickness` declaration**
 
