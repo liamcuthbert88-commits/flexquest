@@ -19,7 +19,7 @@ const EQUIPMENT_COLOR_SWATCHES = [
   "#38BDF8",
   "#F472B6",
   "#A3E635",
-  "#8B5CF6",
+  "#6B8F4E",
   "#F8F9FA",
 ];
 

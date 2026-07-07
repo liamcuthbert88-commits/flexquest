@@ -1,10 +1,10 @@
 import type { PlayAreaBounds } from "@/constants/zones";
 
-/** Duplicates GymFloor3D.tsx's NEON_COLOR/CARDIO_BLUE by value rather than
+/** Duplicates GymFloor3D.tsx's BRAND_ACCENT_COLOR/CARDIO_BLUE by value rather than
  * importing them — this file already did that for CARDIO_ACCENT_COLOR below;
  * kept consistent rather than mixing import and duplicate-constant patterns
  * in the same file. */
-const BRAND_COLOR = "#8B5CF6";
+const BRAND_COLOR = "#6B8F4E";
 const CARDIO_ACCENT_COLOR = "#38BDF8";
 
 const MIRROR_FRAME_COLOR = "#f2f3f5";
@@ -344,7 +344,7 @@ function WeightTree({ position }: { position: [number, number, number] }) {
 
 /** Open crate with rolled yoga mats tucked inside. */
 function YogaBasket({ position }: { position: [number, number, number] }) {
-  const matColors = ["#8B5CF6", "#38BDF8", "#4ADE80"];
+  const matColors = ["#6B8F4E", "#38BDF8", "#4ADE80"];
 
   return (
     <group position={position}>
