@@ -42,6 +42,16 @@ const SHIN_WIDTH = 0.11;
 const FOOT_WIDTH = 0.14;
 const FOOT_HEIGHT = 0.06;
 const FOOT_DEPTH = 0.22;
+/** Every joint below (elbow, knee, ankle) sits two differently-colored
+ * segments end-to-end. Placed exactly flush, their faces are perfectly
+ * coincident — a textbook z-fighting setup, camera-angle-independent,
+ * that reads as the two colors flickering against each other right at the
+ * joint. Each child segment's proximal (joint-facing) end is extended this
+ * far into its parent instead, so the seam is always hidden inside solid
+ * geometry rather than exactly at its surface. Small enough to stay
+ * invisible at this model's scale, comfortably less than the shortest
+ * parent segment it embeds into. */
+const JOINT_OVERLAP = 0.03;
 
 // --- Vertical layout, built bottom-up so every segment sits flush against
 // the one below it, with the feet's bottom at y=0 (floor level, matching
@@ -152,8 +162,8 @@ export function NpcBody({ npc, shirtColor, accentColor }: NpcBodyProps) {
           <meshStandardMaterial color={shirtColor} roughness={0.5} metalness={0.1} />
         </mesh>
         <group position={[0, -UPPER_ARM_LENGTH, 0]} ref={(el) => { leftElbowRef.current = el; }}>
-          <mesh position={[0, -FOREARM_LENGTH / 2, 0]} castShadow>
-            <boxGeometry args={[FOREARM_WIDTH, FOREARM_LENGTH, FOREARM_WIDTH]} />
+          <mesh position={[0, -FOREARM_LENGTH / 2 + JOINT_OVERLAP / 2, 0]} castShadow>
+            <boxGeometry args={[FOREARM_WIDTH, FOREARM_LENGTH + JOINT_OVERLAP, FOREARM_WIDTH]} />
             <meshStandardMaterial color={SKIN_COLOR} roughness={0.6} metalness={0} />
           </mesh>
         </group>
@@ -170,8 +180,8 @@ export function NpcBody({ npc, shirtColor, accentColor }: NpcBodyProps) {
           <meshStandardMaterial color={shirtColor} roughness={0.5} metalness={0.1} />
         </mesh>
         <group position={[0, -UPPER_ARM_LENGTH, 0]} ref={(el) => { rightElbowRef.current = el; }}>
-          <mesh position={[0, -FOREARM_LENGTH / 2, 0]} castShadow>
-            <boxGeometry args={[FOREARM_WIDTH, FOREARM_LENGTH, FOREARM_WIDTH]} />
+          <mesh position={[0, -FOREARM_LENGTH / 2 + JOINT_OVERLAP / 2, 0]} castShadow>
+            <boxGeometry args={[FOREARM_WIDTH, FOREARM_LENGTH + JOINT_OVERLAP, FOREARM_WIDTH]} />
             <meshStandardMaterial color={SKIN_COLOR} roughness={0.6} metalness={0} />
           </mesh>
         </group>
@@ -184,12 +194,12 @@ export function NpcBody({ npc, shirtColor, accentColor }: NpcBodyProps) {
           <meshStandardMaterial color={accentColor} roughness={0.6} metalness={0.05} />
         </mesh>
         <group position={[0, -THIGH_LENGTH, 0]} ref={(el) => { leftKneeRef.current = el; }}>
-          <mesh position={[0, -SHIN_LENGTH / 2, 0]} castShadow>
-            <boxGeometry args={[SHIN_WIDTH, SHIN_LENGTH, SHIN_WIDTH]} />
+          <mesh position={[0, -SHIN_LENGTH / 2 + JOINT_OVERLAP / 2, 0]} castShadow>
+            <boxGeometry args={[SHIN_WIDTH, SHIN_LENGTH + JOINT_OVERLAP, SHIN_WIDTH]} />
             <meshStandardMaterial color={SKIN_COLOR} roughness={0.6} metalness={0} />
           </mesh>
-          <mesh position={[0, -SHIN_LENGTH - FOOT_HEIGHT / 2, 0.05]} castShadow>
-            <boxGeometry args={[FOOT_WIDTH, FOOT_HEIGHT, FOOT_DEPTH]} />
+          <mesh position={[0, -SHIN_LENGTH - FOOT_HEIGHT / 2 + JOINT_OVERLAP / 2, 0.05]} castShadow>
+            <boxGeometry args={[FOOT_WIDTH, FOOT_HEIGHT + JOINT_OVERLAP, FOOT_DEPTH]} />
             <meshStandardMaterial color={FOOT_COLOR} roughness={0.7} metalness={0.05} />
           </mesh>
         </group>
@@ -202,12 +212,12 @@ export function NpcBody({ npc, shirtColor, accentColor }: NpcBodyProps) {
           <meshStandardMaterial color={accentColor} roughness={0.6} metalness={0.05} />
         </mesh>
         <group position={[0, -THIGH_LENGTH, 0]} ref={(el) => { rightKneeRef.current = el; }}>
-          <mesh position={[0, -SHIN_LENGTH / 2, 0]} castShadow>
-            <boxGeometry args={[SHIN_WIDTH, SHIN_LENGTH, SHIN_WIDTH]} />
+          <mesh position={[0, -SHIN_LENGTH / 2 + JOINT_OVERLAP / 2, 0]} castShadow>
+            <boxGeometry args={[SHIN_WIDTH, SHIN_LENGTH + JOINT_OVERLAP, SHIN_WIDTH]} />
             <meshStandardMaterial color={SKIN_COLOR} roughness={0.6} metalness={0} />
           </mesh>
-          <mesh position={[0, -SHIN_LENGTH - FOOT_HEIGHT / 2, 0.05]} castShadow>
-            <boxGeometry args={[FOOT_WIDTH, FOOT_HEIGHT, FOOT_DEPTH]} />
+          <mesh position={[0, -SHIN_LENGTH - FOOT_HEIGHT / 2 + JOINT_OVERLAP / 2, 0.05]} castShadow>
+            <boxGeometry args={[FOOT_WIDTH, FOOT_HEIGHT + JOINT_OVERLAP, FOOT_DEPTH]} />
             <meshStandardMaterial color={FOOT_COLOR} roughness={0.7} metalness={0.05} />
           </mesh>
         </group>
