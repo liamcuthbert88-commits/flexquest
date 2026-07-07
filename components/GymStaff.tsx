@@ -8,6 +8,7 @@ import {
 } from "@/constants/equipment";
 import { ZONE_LANDMARKS, MAIN_FLOOR_ZONE_ID, SMOOTHIE_BAR_POSITION } from "@/constants/zones";
 import { lerpAngle, moveToward } from "@/components/GymNpcs";
+import { NpcBody, STAFF_BUILD } from "@/components/GymNpcBody";
 
 const CLERK_PACE_RANGE = 0.8;
 const CLERK_PACE_SPEED = 0.5;
@@ -16,13 +17,26 @@ const IRON_VAULT_CENTER: [number, number, number] = [-15, 0, -10];
 const MAIN_FLOOR_LANDMARK: [number, number, number] = [0, 0, 6];
 const ROTATION_SMOOTHING_RATE = 6;
 
+/** Fixed per-role phase offsets for NpcBody's walk-cycle animation — not
+ * randomized (this project avoids Math.random() for anything that needs
+ * to stay stable), just distinct literals so the 3 staff don't visually
+ * bob/swing in perfect unison with each other or with the 3 members. */
+const CLERK_ANIMATION_SEED = 0.7;
+const TRAINER_ANIMATION_SEED = 2.1;
+const JANITOR_ANIMATION_SEED = 3.4;
+
 type TrainerRuntime = {
   position: [number, number, number];
   target: [number, number, number];
   retargetTimer: number;
-  /** Visual-only, same technique as GymNpcs.tsx — visible here thanks to the
-   * clipboard prop's asymmetry, unlike a bare capsule. */
+  /** Visual-only, same technique as GymNpcs.tsx — visible here thanks to
+   * the clipboard prop's asymmetry, unlike a bare capsule. */
   facingAngle: number;
+  /** Set from moveToward's own `arrived` return each frame below — read by
+   * NpcBody's getIsWalking so its walk-cycle animation only runs while
+   * actually mid-move, not while standing at (or just arrived at) a
+   * target. */
+  isWalking: boolean;
 };
 
 type JanitorRuntime = {
@@ -30,24 +44,8 @@ type JanitorRuntime = {
   target: [number, number, number];
   landmarkIndex: number;
   facingAngle: number;
+  isWalking: boolean;
 };
-
-/** Regular capsule+head rig, matching GymNpcs — the role distinction comes
- * from uniform color and (for the Trainer/Janitor) one small prop mesh. */
-function StaffBody({ color }: { color: string }) {
-  return (
-    <>
-      <mesh position={[0, 0.5, 0]} castShadow>
-        <capsuleGeometry args={[0.18, 0.4, 4, 8]} />
-        <meshStandardMaterial color={color} roughness={0.5} metalness={0.1} />
-      </mesh>
-      <mesh position={[0, 0.95, 0]} castShadow>
-        <sphereGeometry args={[0.14, 12, 12]} />
-        <meshStandardMaterial color="#e7c9a9" roughness={0.6} metalness={0} />
-      </mesh>
-    </>
-  );
-}
 
 type GymStaffProps = {
   hiredStaffIds: string[];
@@ -56,26 +54,35 @@ type GymStaffProps = {
   equipmentCustomizations: Record<string, EquipmentCustomization>;
 };
 
-/** Separate from GymNpcs.tsx — each role's AI is qualitatively different from
- * the regular member work/recharge cycle (no state machine here, just simple
- * role-specific patrols), so it doesn't share that component's state shape. */
+/** Separate from GymNpcs.tsx — each role's AI is qualitatively different
+ * from the regular member work/recharge cycle (no state machine here, just
+ * simple role-specific patrols), so it doesn't share that component's
+ * state shape. Bodies are NpcBody with STAFF_BUILD (see GymNpcBody.tsx) —
+ * same rig/animation as members, leaner proportions, role distinction
+ * comes from color and (for the Trainer/Janitor) a hand-held prop. */
 export function GymStaff({ hiredStaffIds, unlockedZones, occupancyRef, equipmentCustomizations }: GymStaffProps) {
   const clerkGroupRef = useRef<Group>(null);
   const trainerGroupRef = useRef<Group>(null);
-  const trainerClipboardRef = useRef<Group>(null);
   const janitorGroupRef = useRef<Group>(null);
 
+  /** The Clerk's pacing is pure sine motion along X, computed directly from
+   * the clock rather than accumulated position/target like the Trainer and
+   * Janitor — so unlike them, there's no runtime object to hang a facing
+   * angle off. Kept as its own small ref instead, eased the same way. */
+  const clerkFacingAngle = useRef(0);
   const trainerRuntime = useRef<TrainerRuntime>({
     position: [...IRON_VAULT_CENTER],
     target: [...IRON_VAULT_CENTER],
     retargetTimer: 0,
     facingAngle: 0,
+    isWalking: false,
   });
   const janitorRuntime = useRef<JanitorRuntime>({
     position: [...MAIN_FLOOR_LANDMARK],
     target: [...MAIN_FLOOR_LANDMARK],
     landmarkIndex: 0,
     facingAngle: 0,
+    isWalking: false,
   });
 
   const hiredStaffIdsRef = useRef(hiredStaffIds);
@@ -92,6 +99,20 @@ export function GymStaff({ hiredStaffIds, unlockedZones, occupancyRef, equipment
       const x = SMOOTHIE_BAR_POSITION[0] + Math.sin(clock.elapsedTime * CLERK_PACE_SPEED) * CLERK_PACE_RANGE;
       const z = SMOOTHIE_BAR_POSITION[2] - 0.5;
       clerkGroupRef.current.position.set(x, 0, z);
+
+      // Face the direction of travel (velocity's sign along X) rather than
+      // a fixed angle — with a real jointed rig, legs swinging fore/aft
+      // while the body faces sideways to its actual motion reads as a
+      // moonwalk. Velocity is the sine's derivative, so its sign alone
+      // (not magnitude) decides which way to face.
+      const velocityX = Math.cos(clock.elapsedTime * CLERK_PACE_SPEED);
+      const targetAngle = velocityX >= 0 ? Math.PI / 2 : -Math.PI / 2;
+      clerkFacingAngle.current = lerpAngle(
+        clerkFacingAngle.current,
+        targetAngle,
+        1 - Math.exp(-ROTATION_SMOOTHING_RATE * delta)
+      );
+      clerkGroupRef.current.rotation.y = clerkFacingAngle.current;
     }
 
     if (hiredStaffIdsRef.current.includes("coach_sarah")) {
@@ -113,8 +134,9 @@ export function GymStaff({ hiredStaffIds, unlockedZones, occupancyRef, equipment
       }
 
       const previousPosition = runtime.position;
-      const { position } = moveToward(runtime.position, runtime.target, delta);
+      const { position, arrived } = moveToward(runtime.position, runtime.target, delta);
       runtime.position = position;
+      runtime.isWalking = !arrived;
 
       const dx = position[0] - previousPosition[0];
       const dz = position[2] - previousPosition[2];
@@ -131,9 +153,6 @@ export function GymStaff({ hiredStaffIds, unlockedZones, occupancyRef, equipment
         trainerGroupRef.current.position.set(position[0], position[1], position[2]);
         trainerGroupRef.current.rotation.y = runtime.facingAngle;
       }
-      if (trainerClipboardRef.current) {
-        trainerClipboardRef.current.rotation.z = Math.sin(clock.elapsedTime * 2) * 0.15;
-      }
     }
 
     if (hiredStaffIdsRef.current.includes("cleaner_bob")) {
@@ -148,6 +167,7 @@ export function GymStaff({ hiredStaffIds, unlockedZones, occupancyRef, equipment
       const previousPosition = runtime.position;
       const { position, arrived } = moveToward(runtime.position, runtime.target, delta);
       runtime.position = position;
+      runtime.isWalking = !arrived;
       if (arrived) {
         runtime.landmarkIndex = (runtime.landmarkIndex + 1) % landmarks.length;
         runtime.target = landmarks[runtime.landmarkIndex];
@@ -175,29 +195,49 @@ export function GymStaff({ hiredStaffIds, unlockedZones, occupancyRef, equipment
     <>
       {isClerkHired && (
         <group ref={clerkGroupRef} position={SMOOTHIE_BAR_POSITION}>
-          <StaffBody color="#EF4444" />
+          <NpcBody
+            getIsWalking={() => true}
+            animationSeed={CLERK_ANIMATION_SEED}
+            preset={STAFF_BUILD}
+            shirtColor="#EF4444"
+            accentColor="#EF4444"
+          />
         </group>
       )}
 
       {isTrainerHired && (
         <group ref={trainerGroupRef} position={IRON_VAULT_CENTER}>
-          <StaffBody color="#22C55E" />
-          <group ref={trainerClipboardRef} position={[0.22, 0.6, 0.12]}>
-            <mesh castShadow>
-              <boxGeometry args={[0.12, 0.16, 0.02]} />
-              <meshStandardMaterial color="#8a6a45" roughness={0.6} metalness={0} />
-            </mesh>
-          </group>
+          <NpcBody
+            getIsWalking={() => trainerRuntime.current.isWalking}
+            animationSeed={TRAINER_ANIMATION_SEED}
+            preset={STAFF_BUILD}
+            shirtColor="#22C55E"
+            accentColor="#22C55E"
+            rightHandProp={
+              <mesh position={[0.1, -0.05, 0.06]} castShadow>
+                <boxGeometry args={[0.12, 0.16, 0.02]} />
+                <meshStandardMaterial color="#8a6a45" roughness={0.6} metalness={0} />
+              </mesh>
+            }
+          />
         </group>
       )}
 
       {isJanitorHired && (
         <group ref={janitorGroupRef} position={MAIN_FLOOR_LANDMARK}>
-          <StaffBody color="#EAB308" />
-          <mesh position={[0.15, 0.6, 0]} rotation={[0, 0, 0.3]} castShadow>
-            <cylinderGeometry args={[0.015, 0.015, 0.7, 8]} />
-            <meshStandardMaterial color="#a8a29e" roughness={0.7} metalness={0.1} />
-          </mesh>
+          <NpcBody
+            getIsWalking={() => janitorRuntime.current.isWalking}
+            animationSeed={JANITOR_ANIMATION_SEED}
+            preset={STAFF_BUILD}
+            shirtColor="#EAB308"
+            accentColor="#EAB308"
+            rightHandProp={
+              <mesh position={[0.05, -0.2, 0]} rotation={[0, 0, 0.3]} castShadow>
+                <cylinderGeometry args={[0.015, 0.015, 0.7, 8]} />
+                <meshStandardMaterial color="#a8a29e" roughness={0.7} metalness={0.1} />
+              </mesh>
+            }
+          />
         </group>
       )}
     </>

@@ -7,6 +7,7 @@ import {
   type EquipmentCustomization,
 } from "@/constants/equipment";
 import { ZONE_LANDMARKS, MAIN_FLOOR_ZONE_ID, SMOOTHIE_BAR_POSITION, LOCKER_POSITION } from "@/constants/zones";
+import { NpcBody, MEMBER_BUILD } from "./GymNpcBody";
 
 export const NPC_COLORS = ["#F97316", "#22D3EE", "#E879F9"];
 /** Fixed, not randomized — an NPC should keep the same name every time it's selected. */
@@ -440,26 +441,16 @@ export function GymNpcs({
             }}
             position={LOCKER_POSITION}
           >
-            <mesh position={[0, 0.5, 0]} castShadow>
-              <capsuleGeometry args={[0.18, 0.4, 4, 8]} />
-              <meshStandardMaterial color={color} roughness={0.5} metalness={0.1} />
-            </mesh>
-            {/* Accent "shorts" band — two-tone activewear look. */}
-            <mesh position={[0, 0.28, 0]} castShadow>
-              <cylinderGeometry args={[0.185, 0.185, 0.16, 8]} />
-              <meshStandardMaterial color={accentColor} roughness={0.6} metalness={0.05} />
-            </mesh>
-            {/* Accent "shirt front" panel — clothing variety, and the only
-             * reason facing rotation is visible at all on an otherwise
-             * rotationally-symmetric capsule body. */}
-            <mesh position={[0, 0.58, 0.15]} castShadow>
-              <boxGeometry args={[0.14, 0.18, 0.02]} />
-              <meshStandardMaterial color={accentColor} roughness={0.6} metalness={0.05} />
-            </mesh>
-            <mesh position={[0, 0.95, 0]} castShadow>
-              <sphereGeometry args={[0.14, 12, 12]} />
-              <meshStandardMaterial color="#e7c9a9" roughness={0.6} metalness={0} />
-            </mesh>
+            <NpcBody
+              getIsWalking={() => {
+                const s = npcRuntimesRef.current[i].state;
+                return s === "walkingToEquipment" || s === "walkingToZone" || s === "walkingToBar";
+              }}
+              animationSeed={npcRuntimesRef.current[i].animationSeed}
+              preset={MEMBER_BUILD}
+              shirtColor={color}
+              accentColor={accentColor}
+            />
             {isSelected && (
               <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
                 <ringGeometry args={[0.28, 0.36, 24]} />
