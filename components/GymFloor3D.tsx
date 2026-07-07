@@ -223,7 +223,6 @@ const PATHWAY_WORLD_X = PATHWAY_COLUMNS.map(
 
 const WALL_HEIGHT = 4;
 const WALL_THICKNESS = 0.3;
-const WALL_INSET_FROM_NEON = 0.3;
 const PILLAR_SIZE = 0.4;
 const WALL_COLOR = "#2a2a2e";
 const PILLAR_COLOR = "#1e1e24";
@@ -231,8 +230,6 @@ const PILLAR_COLOR = "#1e1e24";
  * regardless of which zones are unlocked — a stable, sensible "front door"
  * location rather than one that drifts with the bounds' shifting midpoint. */
 const ENTRANCE_GAP_WIDTH = 4;
-const ACCENT_STRIPE_Y = 2.2;
-const ACCENT_STRIPE_HEIGHT = 0.15;
 
 /** Covers the largest possible play area (both zones unlocked: x spans
  * [-20,20], z spans [-15,10]) with margin, so the one remaining shadow-
