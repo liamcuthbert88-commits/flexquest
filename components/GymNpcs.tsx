@@ -7,7 +7,7 @@ import {
   type EquipmentCustomization,
 } from "@/constants/equipment";
 import { ZONE_LANDMARKS, MAIN_FLOOR_ZONE_ID, SMOOTHIE_BAR_POSITION, LOCKER_POSITION } from "@/constants/zones";
-import { NpcBody } from "./GymNpcBody";
+import { NpcBody, MEMBER_BUILD } from "./GymNpcBody";
 
 export const NPC_COLORS = ["#F97316", "#22D3EE", "#E879F9"];
 /** Fixed, not randomized — an NPC should keep the same name every time it's selected. */
@@ -441,7 +441,16 @@ export function GymNpcs({
             }}
             position={LOCKER_POSITION}
           >
-            <NpcBody npc={npcRuntimesRef.current[i]} shirtColor={color} accentColor={accentColor} />
+            <NpcBody
+              getIsWalking={() => {
+                const s = npcRuntimesRef.current[i].state;
+                return s === "walkingToEquipment" || s === "walkingToZone" || s === "walkingToBar";
+              }}
+              animationSeed={npcRuntimesRef.current[i].animationSeed}
+              preset={MEMBER_BUILD}
+              shirtColor={color}
+              accentColor={accentColor}
+            />
             {isSelected && (
               <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
                 <ringGeometry args={[0.28, 0.36, 24]} />
