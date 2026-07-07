@@ -65,6 +65,11 @@ export function GymStaff({ hiredStaffIds, unlockedZones, occupancyRef, equipment
   const trainerGroupRef = useRef<Group>(null);
   const janitorGroupRef = useRef<Group>(null);
 
+  /** The Clerk's pacing is pure sine motion along X, computed directly from
+   * the clock rather than accumulated position/target like the Trainer and
+   * Janitor — so unlike them, there's no runtime object to hang a facing
+   * angle off. Kept as its own small ref instead, eased the same way. */
+  const clerkFacingAngle = useRef(0);
   const trainerRuntime = useRef<TrainerRuntime>({
     position: [...IRON_VAULT_CENTER],
     target: [...IRON_VAULT_CENTER],
@@ -94,6 +99,20 @@ export function GymStaff({ hiredStaffIds, unlockedZones, occupancyRef, equipment
       const x = SMOOTHIE_BAR_POSITION[0] + Math.sin(clock.elapsedTime * CLERK_PACE_SPEED) * CLERK_PACE_RANGE;
       const z = SMOOTHIE_BAR_POSITION[2] - 0.5;
       clerkGroupRef.current.position.set(x, 0, z);
+
+      // Face the direction of travel (velocity's sign along X) rather than
+      // a fixed angle — with a real jointed rig, legs swinging fore/aft
+      // while the body faces sideways to its actual motion reads as a
+      // moonwalk. Velocity is the sine's derivative, so its sign alone
+      // (not magnitude) decides which way to face.
+      const velocityX = Math.cos(clock.elapsedTime * CLERK_PACE_SPEED);
+      const targetAngle = velocityX >= 0 ? Math.PI / 2 : -Math.PI / 2;
+      clerkFacingAngle.current = lerpAngle(
+        clerkFacingAngle.current,
+        targetAngle,
+        1 - Math.exp(-ROTATION_SMOOTHING_RATE * delta)
+      );
+      clerkGroupRef.current.rotation.y = clerkFacingAngle.current;
     }
 
     if (hiredStaffIdsRef.current.includes("coach_sarah")) {
