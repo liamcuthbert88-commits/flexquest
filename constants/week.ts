@@ -42,3 +42,14 @@ export function getDayKeyForDate(date: Date): DayKey {
 export function getTodayKey(): DayKey {
   return getDayKeyForDate(new Date());
 }
+
+/** Local calendar date as "YYYY-MM-DD" — deliberately not `toISOString()`
+ * (which is UTC), so the day boundary matches the player's actual midnight
+ * rather than GMT's. Used to gate the once-per-day workout reward. */
+export function getTodayDateString(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}

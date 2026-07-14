@@ -14,7 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ExerciseCard, type ExerciseBlock } from "@/components/ExerciseCard";
 import { colors, radius, spacing, typography } from "@/constants/theme";
-import { getTodayKey } from "@/constants/week";
+import { getTodayDateString, getTodayKey } from "@/constants/week";
 import { isWorkoutDay, useRoutine, type DayRoutine } from "@/contexts/RoutineContext";
 import { useUser } from "@/contexts/UserContext";
 
@@ -68,7 +68,15 @@ function getFocusLabel(dayRoutine: DayRoutine): string {
 export default function WorkoutScreen() {
   const router = useRouter();
   const { routine } = useRoutine();
-  const { addXp, addCash, cashRewardMultiplier, globalMultiplier, checkQuests } = useUser();
+  const {
+    addXp,
+    addCash,
+    cashRewardMultiplier,
+    globalMultiplier,
+    checkQuests,
+    lastWorkoutRewardDate,
+    recordWorkoutReward,
+  } = useUser();
   const todayRoutine = routine[getTodayKey()];
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [exercises, setExercises] = useState<ExerciseBlock[]>(() =>
@@ -116,6 +124,9 @@ export default function WorkoutScreen() {
   }
 
   function handleFinishWorkout() {
+    const today = getTodayDateString();
+    const alreadyRewarded = lastWorkoutRewardDate === today;
+
     const totalTargetSets = todayRoutine.exercises.reduce(
       (total, exercise) => total + exercise.targetSets,
       0
@@ -132,24 +143,30 @@ export default function WorkoutScreen() {
       cashAwardBeforeMultiplier * cashRewardMultiplier * globalMultiplier
     );
 
-    const { leveledUp, newLevel } = addXp(xpAward);
-    addCash(finalCashAward);
+    const xpToAward = alreadyRewarded ? 0 : xpAward;
+    const cashToAward = alreadyRewarded ? 0 : finalCashAward;
+
+    const { leveledUp, newLevel } = addXp(xpToAward);
+    addCash(cashToAward);
+    if (!alreadyRewarded) recordWorkoutReward(today);
 
     const exerciseNames = exercises.map((exercise) => exercise.name);
     const { newlyCompleted, gymLevelUp } = checkQuests(exerciseNames);
 
     const title = leveledUp ? "Level Up! 🎉" : "Workout Complete! 💪";
-    const lines = [
-      leveledUp ? `You reached Level ${newLevel}!` : `+${WORKOUT_XP_REWARD} XP`,
-      `+$${finalCashAward} Cash`,
-    ];
-    if (bonusEarned) {
+    const lines = alreadyRewarded
+      ? ["Already logged today — no reward."]
+      : [
+          leveledUp ? `You reached Level ${newLevel}!` : `+${WORKOUT_XP_REWARD} XP`,
+          `+$${finalCashAward} Cash`,
+        ];
+    if (!alreadyRewarded && bonusEarned) {
       lines.push(`🎯 Plan Completed! +${TARGET_BONUS_XP} XP bonus`);
     }
-    if (cashRewardMultiplier > 1) {
+    if (!alreadyRewarded && cashRewardMultiplier > 1) {
       lines.push("⚡ Facility bonus applied");
     }
-    if (globalMultiplier > 1) {
+    if (!alreadyRewarded && globalMultiplier > 1) {
       lines.push("🏙️ Prestige/location bonus applied");
     }
     for (const quest of newlyCompleted) {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import {
@@ -73,8 +73,11 @@ export default function TycoonScreen() {
     currentLocation,
     addCash,
     injectDevRiches,
+    resetProgress,
     setEquipmentColor,
     rotateEquipment,
+    pendingOfflineEarnings,
+    clearPendingOfflineEarnings,
   } = useUser();
   const [activePage, setActivePage] = useState<GymPageKey>("gymFloor");
   const [activeShopTab, setActiveShopTab] = useState<ShopTabKey>("equipment");
@@ -132,13 +135,37 @@ export default function TycoonScreen() {
 
   function handleDevRiches() {
     injectDevRiches();
-    const message = "Sandbox Mode Activated: +$10M";
+    const message = "+$1,000 cash and +150 XP injected.";
     if (Platform.OS === "web") {
       if (typeof window !== "undefined") window.alert(message);
     } else {
-      Alert.alert(message, "+$10,000,000 cash and +5,000 Renown injected.");
+      Alert.alert("Sandbox Mode", message);
     }
   }
+
+  function handleDevReset() {
+    if (Platform.OS === "web") {
+      if (typeof window !== "undefined" && window.confirm("Reset all progress back to level one?")) {
+        resetProgress();
+      }
+    } else {
+      Alert.alert("Reset Progress?", "This wipes cash, level, equipment, and quests back to a fresh start.", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Reset", style: "destructive", onPress: () => resetProgress() },
+      ]);
+    }
+  }
+
+  useEffect(() => {
+    if (pendingOfflineEarnings == null) return;
+    const message = `+$${pendingOfflineEarnings} earned while you were away.`;
+    if (Platform.OS === "web") {
+      if (typeof window !== "undefined") window.alert(message);
+    } else {
+      Alert.alert("Welcome Back!", message);
+    }
+    clearPendingOfflineEarnings();
+  }, [pendingOfflineEarnings, clearPendingOfflineEarnings]);
 
   /** Leaving the Gym Floor tab clears the 3D selection rather than leaving it
    * stale: GymFloor3D fully unmounts when its tab isn't active (see below),
@@ -163,6 +190,7 @@ export default function TycoonScreen() {
         onBack={() => router.back()}
         onSnapshot={() => setSnapshotModalVisible(true)}
         onDevRiches={handleDevRiches}
+        onDevReset={handleDevReset}
       />
 
       <View style={styles.pageContainer}>

@@ -10,6 +10,7 @@ type GymTopBarProps = {
   onBack: () => void;
   onSnapshot: () => void;
   onDevRiches: () => void;
+  onDevReset: () => void;
 };
 
 /** Global floating header — visible on every tab of the tycoon screen,
@@ -17,7 +18,15 @@ type GymTopBarProps = {
  * the full detailed Gym Level card (renown bar, prestige button), which
  * moved to the Shop & Upgrades page since it's a bigger, more detailed
  * economic surface than a "clean, minimal" bar should carry. */
-export function GymTopBar({ cash, gymLevel, memberCount, onBack, onSnapshot, onDevRiches }: GymTopBarProps) {
+export function GymTopBar({
+  cash,
+  gymLevel,
+  memberCount,
+  onBack,
+  onSnapshot,
+  onDevRiches,
+  onDevReset,
+}: GymTopBarProps) {
   return (
     <View style={styles.bar}>
       <Pressable onPress={onBack} hitSlop={12} style={styles.iconButton}>
@@ -43,6 +52,11 @@ export function GymTopBar({ cash, gymLevel, memberCount, onBack, onSnapshot, onD
         {__DEV__ && (
           <Pressable onPress={onDevRiches} hitSlop={8} style={styles.devButton}>
             <Text style={styles.devButtonText}>DEV 🔧</Text>
+          </Pressable>
+        )}
+        {__DEV__ && (
+          <Pressable onPress={onDevReset} hitSlop={8} style={styles.devButton}>
+            <Text style={styles.devButtonText}>RESET ⟲</Text>
           </Pressable>
         )}
         <Pressable onPress={onSnapshot} hitSlop={12} style={styles.iconButton}>

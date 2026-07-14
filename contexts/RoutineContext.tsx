@@ -51,7 +51,7 @@ const RoutineContext = createContext<RoutineContextValue | undefined>(undefined)
 export function RoutineProvider({ children }: { children: ReactNode }) {
   const [routine, setRoutine] = useState<Routine>(DEFAULT_ROUTINE);
   const [isHydrated, setIsHydrated] = useState(false);
-  const debouncedSave = useRef(createDebouncedSaver(STORAGE_KEY, SAVE_DEBOUNCE_MS)).current;
+  const saver = useRef(createDebouncedSaver(STORAGE_KEY, SAVE_DEBOUNCE_MS)).current;
 
   useEffect(() => {
     let cancelled = false;
@@ -71,8 +71,8 @@ export function RoutineProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isHydrated) return;
-    debouncedSave(routine);
-  }, [routine, isHydrated, debouncedSave]);
+    saver.debouncedSave(routine);
+  }, [routine, isHydrated, saver]);
 
   const value = useMemo(() => ({ routine, setRoutine }), [routine]);
 

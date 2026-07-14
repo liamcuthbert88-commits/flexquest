@@ -22,7 +22,8 @@ import {
   HEAD_TRAINER_EQUIPMENT_BONUS,
   HEAD_TRAINER_WORKOUT_BONUS,
 } from "@/constants/staff";
-import { createDebouncedSaver, loadJSON } from "@/lib/storage";
+import { createDebouncedSaver, loadJSON, removeJSON } from "@/lib/storage";
+import { AppState } from "react-native";
 
 export const XP_PER_LEVEL = 100;
 export const RENOWN_PER_GYM_LEVEL = 100;
@@ -61,6 +62,8 @@ type PersistedUserStats = {
   equipmentLevels: Record<string, number>;
   hiredStaffIds: string[];
   equipmentCustomizations: Record<string, EquipmentCustomization>;
+  lastActiveTimestamp: number;
+  lastWorkoutRewardDate: string;
 };
 
 function isValidPersistedStats(value: unknown): value is PersistedUserStats {
@@ -84,7 +87,9 @@ function isValidPersistedStats(value: unknown): value is PersistedUserStats {
     stats.equipmentLevels !== null &&
     Array.isArray(stats.hiredStaffIds) &&
     typeof stats.equipmentCustomizations === "object" &&
-    stats.equipmentCustomizations !== null
+    stats.equipmentCustomizations !== null &&
+    typeof stats.lastActiveTimestamp === "number" &&
+    typeof stats.lastWorkoutRewardDate === "string"
   );
 }
 
@@ -114,6 +119,8 @@ type UserContextValue = {
   hireStaff: (staffId: string) => PurchaseResult;
   /** Dev-sandbox cheat — no-ops outside dev builds. */
   injectDevRiches: () => void;
+  /** Dev-only full progress wipe — no-ops outside dev builds. */
+  resetProgress: () => void;
   renownPoints: number;
   renownToNextGymLevel: number;
   gymLevel: number;
@@ -133,6 +140,10 @@ type UserContextValue = {
   setEquipmentColor: (equipmentId: string, color: string) => void;
   rotateEquipment: (equipmentId: string) => void;
   moveEquipment: (equipmentId: string, row: number, col: number) => boolean;
+  lastWorkoutRewardDate: string;
+  recordWorkoutReward: (date: string) => void;
+  pendingOfflineEarnings: number | null;
+  clearPendingOfflineEarnings: () => void;
 };
 
 const UserContext = createContext<UserContextValue | undefined>(undefined);
@@ -156,8 +167,37 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [equipmentCustomizations, setEquipmentCustomizations] = useState<
     Record<string, EquipmentCustomization>
   >({});
+  const [lastActiveTimestamp, setLastActiveTimestamp] = useState(0);
+  const [lastWorkoutRewardDate, setLastWorkoutRewardDate] = useState("");
+  const [pendingOfflineEarnings, setPendingOfflineEarnings] = useState<number | null>(null);
   const [isHydrated, setIsHydrated] = useState(false);
-  const debouncedSave = useRef(createDebouncedSaver(STORAGE_KEY, SAVE_DEBOUNCE_MS)).current;
+  const saver = useRef(createDebouncedSaver(STORAGE_KEY, SAVE_DEBOUNCE_MS)).current;
+
+  function buildPersistedStats(): PersistedUserStats {
+    return {
+      level,
+      xp,
+      cash,
+      purchasedEquipmentIds,
+      purchasedUpgradeIds,
+      hiredManagerIds,
+      renownPoints,
+      gymLevel,
+      completedQuestIds,
+      prestigeCount,
+      currentLocationId,
+      lifetimeCashEarned,
+      unlockedZones,
+      equipmentLevels,
+      hiredStaffIds,
+      equipmentCustomizations,
+      lastActiveTimestamp,
+      lastWorkoutRewardDate,
+    };
+  }
+
+  const latestStatsRef = useRef<PersistedUserStats>(buildPersistedStats());
+  latestStatsRef.current = buildPersistedStats();
 
   useEffect(() => {
     let cancelled = false;
@@ -181,6 +221,50 @@ export function UserProvider({ children }: { children: ReactNode }) {
         setEquipmentLevels(stored.equipmentLevels);
         setHiredStaffIds(stored.hiredStaffIds);
         setEquipmentCustomizations(stored.equipmentCustomizations);
+        setLastActiveTimestamp(stored.lastActiveTimestamp);
+        setLastWorkoutRewardDate(stored.lastWorkoutRewardDate);
+
+        if (stored.lastActiveTimestamp > 0) {
+          const restoredLocation = getLocation(stored.currentLocationId);
+          const restoredGlobalMultiplier =
+            (1 + stored.prestigeCount * 0.5) * restoredLocation.multiplier;
+
+          const hasIronVaultTrainer = stored.hiredStaffIds.includes("coach_sarah");
+          const staffEquipmentBonusMultiplier =
+            1 +
+            (stored.hiredStaffIds.includes("tech_alex") ? EQUIPMENT_TECHNICIAN_BONUS : 0) +
+            (stored.hiredStaffIds.includes("trainer_mike") ? HEAD_TRAINER_EQUIPMENT_BONUS : 0);
+
+          const restoredEquipmentIncome = EQUIPMENT_CATALOG.filter((item) =>
+            stored.purchasedEquipmentIds.includes(item.id)
+          ).reduce((total, item) => {
+            const base = item.cashPerSecond * (stored.equipmentLevels[item.id] ?? 1);
+            const ironVaultBonus =
+              item.zoneId === "iron_vault" && hasIronVaultTrainer ? TRAINER_IRON_VAULT_MULTIPLIER : 1;
+            return total + base * ironVaultBonus * staffEquipmentBonusMultiplier;
+          }, 0);
+
+          const restoredManagerIncome = MANAGER_CATALOG.filter((manager) =>
+            stored.hiredManagerIds.includes(manager.id)
+          ).reduce((total, manager) => total + manager.cashPerSecond, 0);
+
+          const restoredCashPerSecond =
+            (restoredEquipmentIncome + restoredManagerIncome) * restoredGlobalMultiplier;
+
+          const elapsedMs = Math.min(
+            Math.max(Date.now() - stored.lastActiveTimestamp, 0),
+            8 * 60 * 60 * 1000
+          );
+          const offlineEarnings = Math.round((elapsedMs / 1000) * restoredCashPerSecond);
+
+          if (offlineEarnings > 0) {
+            setCash((prev) => prev + offlineEarnings);
+            setLifetimeCashEarned((prev) => prev + offlineEarnings);
+            setPendingOfflineEarnings(offlineEarnings);
+          }
+        }
+
+        setLastActiveTimestamp(Date.now());
       }
       setIsHydrated(true);
     });
@@ -192,25 +276,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isHydrated) return;
-    const stats: PersistedUserStats = {
-      level,
-      xp,
-      cash,
-      purchasedEquipmentIds,
-      purchasedUpgradeIds,
-      hiredManagerIds,
-      renownPoints,
-      gymLevel,
-      completedQuestIds,
-      prestigeCount,
-      currentLocationId,
-      lifetimeCashEarned,
-      unlockedZones,
-      equipmentLevels,
-      hiredStaffIds,
-      equipmentCustomizations,
-    };
-    debouncedSave(stats);
+    saver.debouncedSave(buildPersistedStats());
   }, [
     level,
     xp,
@@ -228,9 +294,23 @@ export function UserProvider({ children }: { children: ReactNode }) {
     equipmentLevels,
     hiredStaffIds,
     equipmentCustomizations,
+    lastActiveTimestamp,
+    lastWorkoutRewardDate,
     isHydrated,
-    debouncedSave,
+    saver,
   ]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "background" || nextState === "inactive") {
+        const now = Date.now();
+        saver.debouncedSave({ ...latestStatsRef.current, lastActiveTimestamp: now });
+        saver.flush();
+        setLastActiveTimestamp(now);
+      }
+    });
+    return () => subscription.remove();
+  }, [saver]);
 
   function addXp(amount: number): AddXpResult {
     const totalXp = xp + amount;
@@ -276,25 +356,43 @@ export function UserProvider({ children }: { children: ReactNode }) {
     return { leveledUp: false, newGymLevel: gymLevel };
   }
 
-  const DEV_CASH_INJECTION = 10_000_000;
-  const DEV_RENOWN_INJECTION = 5000;
-  /** Highest requiredLevel across EQUIPMENT_CATALOG/LOCATION_CATALOG today —
-   * kept as a floor (not an additive amount) so every shop lock reads true. */
-  const DEV_LEVEL_FLOOR = 20;
+  const DEV_CASH_INJECTION = 1000;
+  const DEV_XP_INJECTION = 150;
 
-  /** Dev-only sandbox cheat for testing late-game pricing/configurations
-   * without grinding. Bypasses `creditCash` (this isn't "earned") and reuses
-   * `addRenown`'s existing rollover math so a big renown injection correctly
-   * fast-forwards `gymLevel` too. Equipment purchases gate on the *separate*
-   * `level` stat (workout XP), not `gymLevel` — only bumping renown left
-   * Treadmill/Cable Crossover/Lat Pulldown still locked, so `level` gets an
-   * explicit floor here too. No-ops outside dev builds regardless of caller. */
+  /** Dev-only sandbox cheat: a small, repeatable cash+XP bump per tap for
+   * incremental testing. Bypasses `creditCash` (this isn't "earned").
+   * No-ops outside dev builds regardless of caller. */
   function injectDevRiches() {
     if (!__DEV__) return;
     setCash((prev) => prev + DEV_CASH_INJECTION);
-    addRenown(DEV_RENOWN_INJECTION);
-    setLevel((prev) => Math.max(prev, DEV_LEVEL_FLOOR));
-    setGymLevel((prev) => Math.max(prev, DEV_LEVEL_FLOOR));
+    addXp(DEV_XP_INJECTION);
+  }
+
+  /** Dev-only sandbox reset — wipes the save file and every stat back to a
+   * fresh install's defaults, for retesting progression from level one.
+   * No-ops outside dev builds regardless of caller. */
+  function resetProgress() {
+    if (!__DEV__) return;
+    removeJSON(STORAGE_KEY);
+    setLevel(1);
+    setXp(0);
+    setCash(STARTING_CASH);
+    setPurchasedEquipmentIds([]);
+    setPurchasedUpgradeIds([]);
+    setHiredManagerIds([]);
+    setRenownPoints(0);
+    setGymLevel(1);
+    setCompletedQuestIds([]);
+    setPrestigeCount(0);
+    setCurrentLocationId("garage");
+    setLifetimeCashEarned(0);
+    setUnlockedZones([MAIN_FLOOR_ZONE_ID]);
+    setEquipmentLevels({});
+    setHiredStaffIds([]);
+    setEquipmentCustomizations({});
+    setLastActiveTimestamp(0);
+    setLastWorkoutRewardDate("");
+    setPendingOfflineEarnings(null);
   }
 
   /** Evaluates quests against an explicit context (rather than reading state
@@ -560,6 +658,14 @@ export function UserProvider({ children }: { children: ReactNode }) {
     return { success: true, ...questResult };
   }
 
+  function recordWorkoutReward(date: string): void {
+    setLastWorkoutRewardDate(date);
+  }
+
+  function clearPendingOfflineEarnings(): void {
+    setPendingOfflineEarnings(null);
+  }
+
   function prestigeReset(targetLocationId: string): boolean {
     const target = LOCATION_CATALOG.find((entry) => entry.id === targetLocationId);
     if (!target) return false;
@@ -632,10 +738,15 @@ export function UserProvider({ children }: { children: ReactNode }) {
       hiredStaffIds,
       hireStaff,
       injectDevRiches,
+      resetProgress,
       equipmentCustomizations,
       setEquipmentColor,
       rotateEquipment,
       moveEquipment,
+      lastWorkoutRewardDate,
+      recordWorkoutReward,
+      pendingOfflineEarnings,
+      clearPendingOfflineEarnings,
     }),
     [
       level,
@@ -658,6 +769,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
       unlockedZones,
       hiredStaffIds,
       equipmentCustomizations,
+      lastWorkoutRewardDate,
+      pendingOfflineEarnings,
     ]
   );
 
